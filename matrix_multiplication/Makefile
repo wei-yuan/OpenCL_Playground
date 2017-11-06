@@ -27,7 +27,7 @@ $(TARGET)	:	$(OBJS)
 	@$(CXX) $^ -o $@ $(CFLAGS) $(LIBS) $(LFLAGS) $(LOCAL_CFLAGS)
 
 objs/%.o	:	%.c
-	@echo "  CXX    $@"
+	@echo "  CC    $@"
 	@$(CXX) -c $< -o $@ $(CFLAGS) $(LOCAL_CFLAGS)
 
 objs/%.d	:	%.c

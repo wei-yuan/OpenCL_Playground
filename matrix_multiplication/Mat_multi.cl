@@ -1,5 +1,6 @@
 __kernel void mat_mult(
-    __global float* inputA, __global float* inputB, __global float* outputC
+    __global float* inputA, __global float* inputB, __global float* outputC,
+    int widthA, int widthB
 )
 {
     // int widthA, int heightA, int heightB;
