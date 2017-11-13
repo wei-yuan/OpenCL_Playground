@@ -169,16 +169,26 @@ int main(int argc, char *argv[])
  
     // Build Kernel Program 
     ciErrNum = clBuildProgram(myprog, 0, NULL, NULL, NULL, NULL);     
+    
     if (ciErrNum != CL_SUCCESS) {
         printf("Error: Failed to build program!\n");
+
+        size_t len;
+        char buffer[2048];
+        printf("Error: Failed to build program executable!\n");
+        clGetProgramBuildInfo(myprog, device, CL_PROGRAM_BUILD_LOG, sizeof(buffer), 
+        buffer, &len);
+ 
+        printf("%s\n", buffer);
         return EXIT_FAILURE;
     }
 
     // Create OpenCL Kernel
-    cl_kernel mykernel = clCreateKernel(myprog, "mat_multi", &ciErrNum);
+    // Programe name has to be the same as kernel function name
+    cl_kernel mykernel = clCreateKernel(myprog, "mat_multi", &ciErrNum); 
                             
-    if (!mykernel) {
-        printf("Error: Failed to create kernel!\n");
+    if (!mykernel || ciErrNum != CL_SUCCESS) {
+        printf("Error: Failed to create kernel! ciErrNum = %d\n", ciErrNum);
         return EXIT_FAILURE;
     }                                
 
@@ -196,7 +206,7 @@ int main(int argc, char *argv[])
         printf("Error: Failed to set kernel arguments! %d\n", ciErrNum);
         exit(1);
     }
-/*
+
     // Set local and global work-group sizes
     size_t localws[2] = {2, 2};
     size_t globalws[2] = {widthB, heightA};
@@ -224,7 +234,7 @@ int main(int argc, char *argv[])
                     0,
                     NULL,
                     NULL);
-*/
+
     // sequential result
     /*
         for (int i = 0; i < rows; i++)

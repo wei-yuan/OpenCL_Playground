@@ -1,4 +1,4 @@
-__kernel void mat_mult(
+__kernel void mat_multi(
     __global float* outputC, 
     int widthA, int heightA, int widthB, int heightB, 
     __global float* inputA, __global float* inputB
@@ -17,6 +17,5 @@ __kernel void mat_mult(
         sum += inputA[row*widthA + i] * inputB[widthB*i + col];        
     }
 
-    //outputC[row*widthB + col] = sum;
-    outputC[row*widthB + col] = 666;
+    outputC[row*widthB + col] = sum;
 }
