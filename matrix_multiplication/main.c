@@ -223,7 +223,7 @@ int main(int argc, char *argv[])
                     NULL,
                     NULL);
 
-    // 8. Retrieve result from device to host
+    // Retrieve result from device to host
     ciErrNum = clEnqueueReadBuffer(
                     myqueue, 
                     bufferC, 
@@ -259,10 +259,10 @@ int main(int argc, char *argv[])
     clFinish(myqueue);
     clReleaseContext(ctx);
     clReleaseCommandQueue(myqueue);
-//    clReleaseProgram(myprog);
-//    free(source_str);
-//    fclose(fp);
-//    clReleaseKernel(mykernel);
+    clReleaseProgram(myprog);
+    free(source_str);
+    fclose(fp);
+    clReleaseKernel(mykernel);
 
     return 0;
 }
