@@ -3,8 +3,11 @@
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/highgui/highgui.hpp"
 
-__kernel void mat_multi(
-    
+__kernel void Kalman_predict(
+    __global uint* output_XK_minus,
+    int cols_A, int rows_A,
+    int cols_XK_minus_one, int rows_XK_minus_one
+    __global uint* intput_A, __global uint* intput_XK_minus_one
 )
 {
     // get global position in Y direction    
@@ -15,10 +18,10 @@ __kernel void mat_multi(
 
     float sum = 0.0;
     
-    for(int i=0; i < ; i++)
+    for(int i=0; i < cols_A; i++)
     {
-        sum += inputA[] * inputB[];        
+        sum += input_A[row*cols_A + i] * intput_XK_minus[i*rows_XK_minus_one + col];        
     }
 
-    outputC[] = sum;
+    output_XK_minus_one[row*cols_XK_minus_one + col] = sum;
 }

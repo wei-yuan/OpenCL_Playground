@@ -18,6 +18,8 @@
 
 #define MAX_SOURCE_SIZE (0x100000)
 
+
+// How to deal with Lane is 16 x 1
 namespace my
 {
 class Line

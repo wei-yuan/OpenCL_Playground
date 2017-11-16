@@ -16,8 +16,8 @@
                 "`pkg-config --libs opencv`",
                 "-L/usr/local/cuda/targets/x86_64-linux/lib",
                 "-I/usr/local/cuda/targets/x86_64-linux/include",
-                "-lOpenCL",
-                "-std=c++11" // c++1z即c++17，C语言最新标准为c11，或根据自己的需要进行修改
+                "-lOpenCL"
+                //"-std=c++11" // opencv 3.1 do not support c++11
             ], // 编译命令参数
             "type": "shell",
             "group": {

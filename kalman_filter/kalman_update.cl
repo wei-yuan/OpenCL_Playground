@@ -3,7 +3,7 @@
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/highgui/highgui.hpp"
 
-__kernel void mat_multi(
+__kernel void Kalman_update(
     
 )
 {
