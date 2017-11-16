@@ -4,10 +4,10 @@
 #include "opencv2/highgui/highgui.hpp"
 
 __kernel void Kalman_predict(
-    __global uint* output_XK_minus,
+    __global float* output_XK_minus,
     int cols_A, int rows_A,
     int cols_XK_minus_one, int rows_XK_minus_one
-    __global uint* intput_A, __global uint* intput_XK_minus_one
+    __global float* intput_A, __global float* intput_XK_minus_one
 )
 {
     // get global position in Y direction    
@@ -20,8 +20,8 @@ __kernel void Kalman_predict(
     
     for(int i=0; i < cols_A; i++)
     {
-        sum += input_A[row*cols_A + i] * intput_XK_minus[i*rows_XK_minus_one + col];        
+        sum += input_A[row*cols_A + i] * intput_XK_minus[i*cols_XK_minus_one + col];        
     }
 
-    output_XK_minus_one[row*cols_XK_minus_one + col] = sum;
+    output_XK_minus[row*cols_XK_minus_one + col] = sum;
 }

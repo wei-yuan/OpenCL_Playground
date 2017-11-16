@@ -23,19 +23,25 @@ int main(int argc, char *argv[])
     
     //Assign Lane value, prepare for X(k-1)
     //output
-    cv::UMat Xkminus = cv::UMat::ones(16, 1, CV_8UC1);
-    // input
-    cv::UMat Xk_minus_one = cv::UMat::ones(16, 1, CV_8UC1);
-    cv::UMat A            = cv::UMat::ones(16, 16, CV_8UC1);
+    //cv::Mat Xk_minus = cv::Mat::ones(16, 1, CV_32F);    
+    // input    
+    /*
+    cv::Mat A            = cv::Mat::ones(16, 16, CV_32F);
+    cv::Mat Xk_minus_one = cv::Mat::ones(16, 1, CV_32F);    
+    */
+    cv::Mat Xk_minus = cv::Mat::zeros(4, 4, CV_32F);
+    cv::Mat A            = cv::Mat::ones(4, 4, CV_32F);    
+    cv::Mat Xk_minus_one = cv::Mat::ones(4, 4, CV_32F);    
 
-    cv::UMat ATsp    = A.t(); // transpose
-    cv::UMat Pkminus = cv::UMat::ones(16, 16, CV_8UC1);
-    cv::UMat Q       = cv::UMat::ones(16, 16, CV_8UC1);
+    cv::Mat ATsp    = A.t(); // transpose
+    cv::Mat Pkminus = cv::Mat::ones(16, 16, CV_32F);
+    cv::Mat Q       = cv::Mat::ones(16, 16, CV_32F);
 
     int heightX, widthX, heightB, widthB, DP, MP;
     DP = 16; MP = 8;
 
-    char err;
+    char err; 
+    
     cv::ocl::setUseOpenCL(true);
     // ---------------------------------------------------------
     // OpenCL environment setting
@@ -72,17 +78,26 @@ int main(int argc, char *argv[])
     }
 
     // Transfer Mat data to the device    
-    cv::Mat mat_src = cv::imread("/home/alex504/img_video_file/test_img.jpg", cv::IMREAD_GRAYSCALE);
-    cv::UMat umat_src = mat_src.getUMat(cv::ACCESS_READ, cv::USAGE_ALLOCATE_DEVICE_MEMORY);
-    cv::UMat umat_dst(mat_src.size(), mat_src.type(), cv::ACCESS_WRITE, cv::USAGE_ALLOCATE_DEVICE_MEMORY);
+    //cv::Mat mat_src = cv::imread("/home/alex504/img_video_file/test_img.jpg", cv::IMREAD_GRAYSCALE);
+    //cv::UMat umat_src = mat_src.getUMat(cv::ACCESS_READ, cv::USAGE_ALLOCATE_DEVICE_MEMORY);
+    
+    // Transfer Mat format to OpenCL UMat format
+    // enumerator of ? : cv::ACCESS_READ
+    // cv::USAGE_ALLOCATE_DEVICE_MEMORY : enumerator of allocator
+    cv::UMat Xkmo_ = Xk_minus_one.getUMat(cv::ACCESS_READ, cv::USAGE_ALLOCATE_DEVICE_MEMORY);
+    cv::UMat A_    = A.getUMat(cv::ACCESS_READ, cv::USAGE_ALLOCATE_DEVICE_MEMORY);
+    cv::UMat Xkm_  = Xk_minus.getUMat(cv::ACCESS_WRITE, cv::USAGE_ALLOCATE_DEVICE_MEMORY);
 
     //Here is where you change which GPU to use (e.g. 0 or 1)
     cv::ocl::Device(context.device(0));
 
-    // Read the OpenCL kernel code
+    // Read OpenCL kernel code
     std::ifstream ifs("kalman_predict.cl");
-    if (ifs.fail()) 
+    if (ifs.fail())
+    {
+        printf("Fail to read kernel\n");
         return -1;
+    }        
     std::string kernelSource((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     cv::ocl::ProgramSource programSource(kernelSource);
 
@@ -92,38 +107,46 @@ int main(int argc, char *argv[])
     cv::ocl::Program program = context.getProg(programSource, buildopt, errmsg);    
 
     // create kernel
-    cv::ocl::Kernel kernel("kalman_predict", program);
-    // kernel argument
-    kernel.args(cv::ocl::KernelArg::ReadOnlyNoSize(umat_src), cv::ocl::KernelArg::ReadWrite(umat_dst));
-
-    //Set local and global work-group sizes
-    size_t localws[2] = {2, 2};
-    cv::Size x = Xk_minus_one.size();
-    cv::Size As = A.size();
-    size_t globalws[2] = {x.height, As.height};
-
-    size_t globalThreads[3] = { mat_src.cols, mat_src.rows, 1 };
-    size_t localThreads[3] = { 16, 16, 1 };
-    
-    bool success = kernel.run(3, globalThreads, NULL, true);
-    if (!success){
-        cout << "Failed running the kernel..." << endl;
+    cv::ocl::Kernel kernel("kalman_predict", program);    
+    if (kernel.empty())
+    {
+        printf("Fail to create kernel\n");
         return -1;
     }
 
-    //Retrieve result from device to host
-    // Download the dst data from the device (?)    
-    cv::Mat mat_dst = umat_dst.getMat(cv::ACCESS_READ);
+    // kernel argument    
+    kernel.args(cv::ocl::KernelArg::WriteOnly(Xkm_),
+                A_.cols, A_.rows,
+                Xkmo_.cols, Xkmo_.rows,
+                cv::ocl::KernelArg::ReadOnlyNoSize(A_),
+                cv::ocl::KernelArg::ReadOnlyNoSize(Xkmo_));    
+
+    // global size
+    size_t globalsize[2] = {(size_t)Xk_minus_one.rows, (size_t)Xk_minus_one.cols};
+    //size_t localsize[3]  = {1, 1};
+
+    bool success = kernel.run(2, globalsize, NULL, true);    
+    if (!success){
+        std::cerr << "Failed running the kernel..." << std::endl;
+        return -1;
+    }
+
+    // Retrieve result from device to host
+    Xk_minus = Xkm_.getMat(cv::ACCESS_READ);
     
     // Display Result
-    for (int i = 0; i < Xk_minus_one_rows; i++) {
-        for (int j = 0; j < Xk_minus_one_cols; j++) {
-            printf("%f ", C[i][j]);
+    for (int i = 0; i < Xk_minus.rows; i++) {
+        for (int j = 0; j < Xk_minus.cols; j++) {
+            //printf("%f ", Xkm_.getMat(cv::ACCESS_READ).at<CV_32FC1>(i,j));
+            printf("%lf ", Xk_minus.at<double>(i,j));
         }
         printf("\n");
     }    
     
     // release resource
+    Xk_minus.release();
+    A.release();
+    Xk_minus_one.release();    
 
     return 0;
 }
