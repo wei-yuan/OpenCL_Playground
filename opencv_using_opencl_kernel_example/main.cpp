@@ -9,12 +9,14 @@ using namespace std;
 
 int main()
 {
+    // check OpenCL availability
     if (!cv::ocl::haveOpenCL())
     {
         cout << "OpenCL is not avaiable..." << endl;
         return -1;
     }
-    
+
+    // create context
     cv::ocl::Context context;
     if (!context.create(cv::ocl::Device::TYPE_GPU))
     {
@@ -22,7 +24,7 @@ int main()
         return -1;
     }
 
-    // In OpenCV 3.0.0 beta, only a single device is detected.
+    // device detection
     cout << context.ndevices() << " GPU devices are detected." << endl;
     for (int i = 0; i < context.ndevices(); i++)
     {
@@ -54,11 +56,14 @@ int main()
     cv::String buildopt = ""; // By setting "-D xxx=yyy ", we can replace xxx with yyy in the kernel
     cv::ocl::Program program = context.getProg(programSource, buildopt, errmsg);
 
+    // create kernel
     cv::ocl::Kernel kernel("neg", program);
+    // kernel argument
     kernel.args(cv::ocl::KernelArg::ReadOnlyNoSize(umat_src), cv::ocl::KernelArg::ReadWrite(umat_dst));
 
     size_t globalThreads[3] = { mat_src.cols, mat_src.rows, 1 };
-    //size_t localThreads[3] = { 16, 16, 1 };
+    size_t localThreads[3] = { 16, 16, 1 };
+    
     bool success = kernel.run(3, globalThreads, NULL, true);
     if (!success){
         cout << "Failed running the kernel..." << endl;
