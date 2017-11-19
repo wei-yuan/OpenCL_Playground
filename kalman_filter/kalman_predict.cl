@@ -1,27 +1,15 @@
-// Compute X(k)- and P(k)-
-// input A, X(k-), P(k) and -Q
-#include "opencv2/imgproc/imgproc.hpp"
-#include "opencv2/highgui/highgui.hpp"
-
-__kernel void Kalman_predict(
-    __global float* output_XK_minus,
-    int cols_A, int rows_A,
-    int cols_XK_minus_one, int rows_XK_minus_one
-    __global float* intput_A, __global float* intput_XK_minus_one
-)
+__kernel void kalman_predict(
+   __global uchar* src,
+   int src_step, int src_offset,
+   __global uchar* dst,
+   int dst_step, int dst_offset, int dst_rows, int dst_cols)
 {
-    // get global position in Y direction    
-    // get_global_id(): return the number of work-item
-    int row = get_global_id(1);
-    // get global position in X direction
-    int col = get_global_id(0);
-
-    float sum = 0.0;
-    
-    for(int i=0; i < cols_A; i++)
-    {
-        sum += input_A[row*cols_A + i] * intput_XK_minus[i*cols_XK_minus_one + col];        
-    }
-
-    output_XK_minus[row*cols_XK_minus_one + col] = sum;
-}
+    int x = get_global_id(0);
+    int y = get_global_id(1);
+    //end condition
+    if (x >= dst_cols) return;
+    //computation
+    int src_index = mad24(y, src_step, x + src_offset);
+    int dst_index = mad24(y, dst_step, x + dst_offset);
+    dst[dst_index] = 255 - src[src_index];
+};
