@@ -37,9 +37,17 @@ int main()
     cv::ocl::Device(context.device(0));
 
     // Transfer Mat data to the device
-    cv::Mat mat_src = cv::imread("/home/alex504/img_video_file/test_img.jpg", cv::IMREAD_GRAYSCALE);
-    cv::UMat umat_src = mat_src.getUMat(cv::ACCESS_READ, cv::USAGE_ALLOCATE_DEVICE_MEMORY);
-    cv::UMat umat_dst(mat_src.size(), mat_src.type(), cv::ACCESS_WRITE, cv::USAGE_ALLOCATE_DEVICE_MEMORY);
+    cv::Mat mat_src = cv::imread("/home/alex504/img_video_file/test_img.jpg", cv::IMREAD_GRAYSCALE);    
+    cv::Mat mat_resize;
+    resize(mat_src, mat_resize,cv::Size(), 0.01, 0.01);
+    std::cout << "mat_resize: \n" << mat_resize << std::endl;
+
+    cv::Mat src2 = cv::Mat::ones(4, 4, CV_8UC1);
+    std::cout << "src2: \n" << src2 << std::endl;
+
+    cv::UMat umat_src = mat_resize.getUMat(cv::ACCESS_READ, cv::USAGE_ALLOCATE_DEVICE_MEMORY);
+    cv::UMat usrc2 = src2.getUMat(cv::ACCESS_READ, cv::USAGE_ALLOCATE_DEVICE_MEMORY);    
+    cv::UMat umat_dst(mat_resize.size(), mat_resize.type(), cv::ACCESS_WRITE, cv::USAGE_ALLOCATE_DEVICE_MEMORY);
 
     // Read the OpenCL kernel code
     std::ifstream ifs("kalman_predict.cl");
@@ -56,7 +64,9 @@ int main()
     // create kernel
     cv::ocl::Kernel kernel("kalman_predict", program);
     // kernel argument
-    kernel.args(cv::ocl::KernelArg::ReadOnlyNoSize(umat_src), cv::ocl::KernelArg::ReadWrite(umat_dst));
+    kernel.args(cv::ocl::KernelArg::ReadOnlyNoSize(umat_src), 
+                cv::ocl::KernelArg::ReadOnlyNoSize(usrc2),
+                cv::ocl::KernelArg::ReadWrite(umat_dst));
 
     size_t globalThreads[3] = { (size_t)mat_src.cols, (size_t)mat_src.rows, 1 };
     //size_t localThreads[3] = { 16, 16, 1 };
@@ -69,6 +79,7 @@ int main()
 
     // Download the dst data from the device (?)
     cv::Mat mat_dst = umat_dst.getMat(cv::ACCESS_READ);
+    std::cout << "mat_dst: \n" << mat_dst << std::endl;
 
     cv::imshow("src", mat_src);
     cv::imshow("dst", mat_dst);
