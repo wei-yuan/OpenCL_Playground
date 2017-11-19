@@ -80,10 +80,10 @@ int main()
     // Download the dst data from the device (?)
     cv::Mat mat_dst = umat_dst.getMat(cv::ACCESS_READ);
     std::cout << "mat_dst: \n" << mat_dst << std::endl;
-
+/*
     cv::imshow("src", mat_src);
     cv::imshow("dst", mat_dst);
     cv::waitKey();
-
+*/
     return 0;
 }
