@@ -61,12 +61,18 @@ int main()
     cv::String buildopt = ""; // By setting "-D xxx=yyy ", we can replace xxx with yyy in the kernel
     cv::ocl::Program program = context.getProg(programSource, buildopt, errmsg);
 
+    for(int i=0; i< 2;i++)
+    {        
+        std::cout << "umat_src step[" << i << "]:" << umat_src.step[i] << std::endl;        
+    }
+    std::cout << "umat_src offset: " << umat_src.offset << std::endl;
+
     // create kernel
     cv::ocl::Kernel kernel("kalman_predict", program);
     // kernel argument
     kernel.args(cv::ocl::KernelArg::ReadOnlyNoSize(umat_src), 
                 cv::ocl::KernelArg::ReadOnlyNoSize(usrc2),
-                cv::ocl::KernelArg::ReadWrite(umat_dst));
+                cv::ocl::KernelArg::ReadWrite(umat_dst));    
 
     size_t globalThreads[3] = { (size_t)mat_src.cols, (size_t)mat_src.rows, 1 };
     //size_t localThreads[3] = { 16, 16, 1 };
