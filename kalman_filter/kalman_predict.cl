@@ -7,13 +7,11 @@ __kernel void kalman_predict(
    int dst_step, int dst_offset,
    int dst_rows, int dst_cols)
 {
-    // col
-    int x = get_global_id(0);
-    // row
-    int y = get_global_id(1);
+    int col = get_global_id(0);
+    int row = get_global_id(1);
     //end condition
-    if (x >= dst_cols) return;
-    //computation
+    if (col >= dst_cols) return;
+/*    
     //gentype mad24 (gentype x,
  	//               gentype y,
  	//               gentype z) 
@@ -21,13 +19,16 @@ __kernel void kalman_predict(
     // -> Fast integer function to multiply 24-bit integers and add a 32-bit value.
     // mad24 multiplies two 24-bit integer values x and y, 
     // and add the 32-bit integer result to the 32-bit integer z    
-    // i.e. mad24(x,y,z) = x*y + z
-    // (int):   32-bit signed integer 
-    // (uchar): 8-bit unsigned integer
-    int src1_index = mad24(y, src1_step, x + src1_offset); // #row * step + col = index
-    int src2_index = mad24(y, src2_step, x + src2_offset);
-    
-    int dst_index = mad24(y, dst_step, x + dst_offset);
+    // i.e. mad24(x,y,z) = x * y + z    
+    int src1_index = mad24(row, src1_step, col + src1_offset); // #row * step + col = index
+    int src2_index = mad24(row, src2_step, col + src2_offset);    
+    int dst_index = mad24(row, dst_step, col + dst_offset);
+*/
+    float sum = 0.0;
+    for(size_t i=0; i < (size_t)src1_step; i++)
+    {
+        sum += src1[row * src1_step + i] * src2[i * src2_step + col];
+    }
 
-    dst[dst_index] = src1[src1_index] + src2[src2_index];
+    dst[dst_index] = sum;    
 };
