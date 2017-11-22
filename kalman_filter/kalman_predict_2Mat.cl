@@ -1,5 +1,5 @@
 //template<typename T>
-__kernel void kalman_predict(
+__kernel void kalman_predict_2Mat(
    int mat_type,
    __global float* src1,
    int src1_step, int src1_offset,
@@ -13,7 +13,7 @@ __kernel void kalman_predict(
     int row = get_global_id(1);
     //end condition
     if (col >= dst_cols) return;
-       
+
     // spec conversion
     if(mat_type == 5) // CV_32FC1: 5
     {
