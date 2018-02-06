@@ -208,7 +208,8 @@ int main(int argc, char **argv)
 
     cl_a   = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * DATA_SIZE, NULL, NULL);
     cl_b   = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * DATA_SIZE, NULL, NULL);
-    cl_res = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * DATA_SIZE, NULL, NULL);
+    // change cl_res from CL_MEM_WRITE_ONLY to CL_MEM_READ_WRITE
+    cl_res = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * DATA_SIZE, NULL, NULL);
     if (cl_a == 0 || cl_b == 0 || cl_res == 0)
     {
         std::cout << "Can't create OpenCL buffer" << std::endl;
@@ -237,11 +238,9 @@ int main(int argc, char **argv)
 
     adder = clCreateKernel(program, "adder", &err);
     if (err == CL_INVALID_KERNEL_NAME)
-        printf("CL_INVALID_KERNEL_NAME\n");
+        std::cout << "CL_INVALID_KERNEL_NAME" << std::endl;
     if (adder == NULL)
-    {
         std::cout << "Can't load kernel" << std::endl;
-    }
 
     clSetKernelArg(adder, 0, sizeof(cl_mem), &cl_a);
     clSetKernelArg(adder, 1, sizeof(cl_mem), &cl_b);
@@ -254,34 +253,120 @@ int main(int argc, char **argv)
         std::cout << "Can't enqueue kernel" << std::endl;
         release_opencl(context, queue, program, cl_a, cl_b, cl_res, adder);
     }
+
+    //--------------------------------
+    // Test: before read data from GPU, add zero to re(sult) array
+    //--------------------------------
+    std::cout << "***********" << std::endl;
+    std::cout << "Add zero" << std::endl;
+    std::cout << "***********" << std::endl;
+    // Init
+    cl_mem           cl_zero = 0, cl_zero_result = 0;
+    cl_event         event_zero;
+    float            zero[DATA_SIZE], res_zero[DATA_SIZE];
+
+    // assign value
+    for (i = 0; i < DATA_SIZE; i++)
+    {
+        zero[i] = 0;
+        res_zero[i] = 0;
+    }
+
+    // create read / write buffer
+    cl_zero        = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * DATA_SIZE, NULL, NULL);
+    cl_zero_result = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * DATA_SIZE, NULL, NULL);
+
+    // check whether buffer is created successfully
+    if ( cl_zero == 0 || cl_zero_result == 0 )
+    {
+        std::cout << "Can't create OpenCL buffer" << std::endl;
+        release_opencl(context, queue, program, cl_res, cl_zero, cl_zero_result, adder);
+    }
+
+    // enqueue write buffer
+    if (clEnqueueWriteBuffer(queue, cl_zero, CL_TRUE, 0, sizeof(float) * DATA_SIZE, zero, 0, 0, 0) == CL_SUCCESS)
+    {
+        std::cout << "Write Buffer 3" << std::endl;
+    }
+    else
+    {
+        std::cout << "Fail to enqueue buffer cl_zero" << std::endl;
+        release_opencl(context, queue, program, cl_res, cl_zero, cl_zero_result, adder);
+    }
+
+    // set kernel argument
+    clSetKernelArg(adder, 0, sizeof(cl_mem), &cl_res);
+    clSetKernelArg(adder, 1, sizeof(cl_mem), &cl_zero);
+    clSetKernelArg(adder, 2, sizeof(cl_mem), &cl_zero_result);     
+
+    // enqueue kernel
+    if (clEnqueueNDRangeKernel(queue, adder, 1, 0, &work_size, 0, 0, 0, &event_zero) != CL_SUCCESS)
+    {
+        std::cout << "Can't enqueue add zero kernel" << std::endl;
+        release_opencl(context, queue, program, cl_res, cl_zero, cl_zero_result, adder);
+    }
+    
+    //--------------------------------
+    // read result
+    //--------------------------------
     if (clEnqueueReadBuffer(queue, cl_res, CL_TRUE, 0, sizeof(float) * DATA_SIZE, res, 0, 0, 0) != CL_SUCCESS)
     {
         std::cout << "Can't enqueue read buffer" << std::endl;
-        release_opencl(context, queue, program, cl_a, cl_b, cl_res, adder);        
+        release_opencl(context, queue, program, cl_a, cl_b, cl_res, adder);
+    }
+    
+    // read result from adding zero kernel
+    if (clEnqueueReadBuffer(queue, cl_zero_result, CL_TRUE, 0, sizeof(float) * DATA_SIZE, res_zero, 0, 0, 0) != CL_SUCCESS)
+    {
+        std::cout << "Can't enqueue read zero buffer" << std::endl;
+        release_opencl(context, queue, program, cl_res, cl_zero, cl_zero_result, adder);
     }
 
+    // difference between clFinish() ?
     clWaitForEvents(1, &event);
-    printf("Execution Time: %.04lf ms\n\n", get_event_exec_time(event));
+    clWaitForEvents(1, &event_zero);
+
+    std::cout << "Execution Time: " <<  get_event_exec_time(event) << "ms" << std::endl;
+    std::cout << "Execution Time: " <<  get_event_exec_time(event_zero) << "ms" << std::endl;
+    //std::cout << "Execution Time: %.04lf ms" <<  get_event_exec_time(event_zero) << std::endl;
 
     // Make sure everything is done before we do anything
     clFinish(queue);
+
     err = 0;
     for (i = 0; i < DATA_SIZE; i++)
     {
         if (res[i] != a[i] + b[i])
         {
-            printf("%f + %f = %f(answer %f)\n", a[i], b[i], res[i], a[i] + b[i]);
+            std::cout << a[i] << "+" << b[i] << "=" << res[i] << " (answer :" << a[i] + b[i] <<")"<< std::endl;
             err++;
         }
     }
     if (err == 0)
-        printf("Validation passed\n");
+        std::cout << "Validation passed" << std::endl;
     else
-        printf("Validation failed, %d\n", err);
-    printf("------\n");
+        std::cout << "Validation failed, " << err << std::endl;
+    std::cout << "------" << std::endl;
 
+    err = 0;
+    // case of adding zero
+    for (i = 0; i < DATA_SIZE; i++)
+    {
+        if (res_zero[i] != res[i] + zero[i])
+        {
+            std::cout << res[i] << " + " << zero[i] << " = " << res_zero[i] << " (answer :" << res[i] + zero[i] <<")"<< std::endl;
+            err++;
+        }
+    }
+    if (err == 0)
+        std::cout << "Validation passed" << std::endl;
+    else
+        std::cout << "Validation failed, " << err << std::endl;
+    std::cout << "------" << std::endl;
+    
     //--------------------------------
     // Second test
+    //--------------------------------
     for (i = 0; i < DATA_SIZE; i++)
     {
         a[i]   = i;
@@ -291,6 +376,11 @@ int main(int argc, char **argv)
 
     check_err(clEnqueueWriteBuffer(queue, cl_a, CL_TRUE, 0, sizeof(float) * DATA_SIZE, a, 0, 0, 0), "Write Buffer 1");
     check_err(clEnqueueWriteBuffer(queue, cl_b, CL_TRUE, 0, sizeof(float) * DATA_SIZE, b, 0, 0, 0), "Write Buffer 2");
+
+    // set kernel argument
+    clSetKernelArg(adder, 0, sizeof(cl_mem), &cl_a);
+    clSetKernelArg(adder, 1, sizeof(cl_mem), &cl_b);
+    clSetKernelArg(adder, 2, sizeof(cl_mem), &cl_res);    
 
     check_err(clEnqueueNDRangeKernel(queue, adder, 1, 0, &work_size, 0, 0, 0, &event), "Can't enqueue kernel");
     check_err(clEnqueueReadBuffer(queue, cl_res, CL_TRUE, 0, sizeof(float) * DATA_SIZE, res, 0, 0, 0),
