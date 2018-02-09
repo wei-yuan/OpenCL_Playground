@@ -227,10 +227,9 @@ int main(int argc, char **argv)
         std::cout << "CL_INVALID_KERNEL_NAME" << std::endl;
     if (ker_matToHistogram == NULL)
         std::cout << "Can't load kernel" << std::endl;    
-
+    
     std::cout << "HISTS_COUNT(= compunits) =" << cv::ocl::Device::getDefault().maxComputeUnits() << std::endl;
     std::cout << "WGS ="  << cv::ocl::Device::getDefault().maxWorkGroupSize() << std::endl;
-
 
     // kernel argument
     //__global const uchar * src_ptr, int src_step, int src_offset, 
@@ -258,22 +257,24 @@ int main(int argc, char **argv)
     clSetKernelArg(ker_matToHistogram, 5, sizeof(cl_mem), &cl_hist);
     clSetKernelArg(ker_matToHistogram, 6, sizeof(cl_int), &total);  
     
-    clSetKernelArg(ker_matToHistogram, 7, sizeof(cl_int), &clbins);
-    clSetKernelArg(ker_matToHistogram, 8, sizeof(cl_int), &HISTS_COUNT);
-    clSetKernelArg(ker_matToHistogram, 9, sizeof(cl_int), &WGS);
+    // clSetKernelArg(ker_matToHistogram, 7, sizeof(cl_int), &clbins);
+    // clSetKernelArg(ker_matToHistogram, 7, sizeof(cl_int), &HISTS_COUNT);
+    // clSetKernelArg(ker_matToHistogram, 8, sizeof(cl_int), &WGS);
     
     //set local and global workgroup sizes 
     size_t localws[2] = {1, 1};
     size_t globalws[2] = {resize_src.cols, resize_src.rows}; 
 
     //execute the kernel
-    err = clEnqueueNDRangeKernel(queue, ker_matToHistogram, 2, 0, globalws, localws, 0, 0, &event);
-    if (clEnqueueNDRangeKernel(queue, ker_matToHistogram, 2, 0, globalws, localws, 0, 0, &event) != CL_SUCCESS)
+    err = clEnqueueNDRangeKernel(queue, ker_matToHistogram, 1, 0, globalws, localws, 0, 0, &event);
+    if (clEnqueueNDRangeKernel(queue, ker_matToHistogram, 1, 0, globalws, localws, 0, 0, &event) != CL_SUCCESS)
     {
         std::cout << "Can't enqueue kernel" << std::endl;
         std::cout << "err = " << err << std::endl;
         release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_matToHistogram);
     }    
+
+
 
     //--------------------------------
     // read result
@@ -296,7 +297,15 @@ int main(int argc, char **argv)
     clFinish(queue);    
     
     // output result
-    std::cout << "mat_hist = " << mat_hist << std::endl;    
+    // try printf() to check?
+    //std::cout << "mat_hist = " << mat_hist << std::endl;    
+    int i = 0;
+    printf("mat_hist = [");
+    for(i = 0; i<bins; i++)
+    {        
+        printf("%.1f,", mat_hist.at<float>(1, i));        
+    }
+    printf("]");
 
     // release resource
     clReleaseContext(context);

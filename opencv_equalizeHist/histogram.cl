@@ -12,11 +12,11 @@
 #endif
 
 #ifndef WGS
-#define WGS 1024 // nv GTX 660 WGS: 1024
+#define WGS 1024 // nv GTX 660 max WGS: 1024
 #endif
 
 #ifndef HISTS_COUNT
-#define HISTS_COUNT 5
+#define HISTS_COUNT 5 // nv GTX 660 max HISTS_COUNT: 5
 #endif
 
 // src_ptr: pointer to memory location of source image 
@@ -30,12 +30,7 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
     int id = get_global_id(0) * kercn;
     int gid = get_group_id(0);
 
-    // int BINS = 256;
-    // int HISTS_COUNT = 5; // nv GTX 660 HISTS_COUNT: 5
-    // size_t WGS = 1024;   // nv GTX 660 WGS: 1024
-
-    //__local int localhist[BINS]; // variable length arrays are not supported in OpenCL...
-    __local int localhist[BINS];  
+    __local int localhist[BINS]; 
 
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
@@ -89,13 +84,8 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    __global int * hist = (__global int *)(histptr + gid * BINS * (int)sizeof(int));
+    __global int *hist = (__global int *)(histptr + gid * BINS * (int)sizeof(int));
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
         hist[i] = localhist[i];
 }
-/*
-__kernel void calculate_histogram(__global const uchar * src_ptr, __global uchar * histptr)
-{
-}
-*/

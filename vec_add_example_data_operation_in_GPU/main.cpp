@@ -26,6 +26,7 @@
 #include <CL/cl.h>
 #include <iostream>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 double get_event_exec_time(cl_event event)
@@ -161,7 +162,6 @@ void release_opencl(cl_context context, cl_command_queue queue, cl_program progr
 
 int main(int argc, char **argv)
 {
-
     cl_int           err     = 0;
     cl_context       context = 0;
     cl_device_id *   devices = NULL;
@@ -256,9 +256,9 @@ int main(int argc, char **argv)
     //--------------------------------
     // Test: before read data from GPU, add zero to re(sult) array
     //--------------------------------
-    std::cout << "***********" << std::endl;
-    std::cout << "Add zero" << std::endl;
-    std::cout << "***********" << std::endl;
+    std::cout << "***************************" << std::endl;
+    std::cout << "Additional Task: Add zero" << std::endl;
+    std::cout << "***************************" << std::endl;
     // Init
     cl_mem           cl_zero = 0, cl_zero_result = 0;
     cl_event         event_zero;
@@ -356,7 +356,7 @@ int main(int argc, char **argv)
             std::cout << res[i] << " + " << zero[i] << " = " << res_zero[i] << " (answer :" << res[i] + zero[i] <<")"<< std::endl;
             err++;
         }
-    }
+    }  
     if (err == 0)
         std::cout << "Validation passed" << std::endl;
     else

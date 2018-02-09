@@ -1,10 +1,22 @@
 // from: opencv/modules/imgproc/src/opencl/histogram.cl
 #ifndef kercn
-#define kercn 1
+#define kercn 3
 #endif
 
 #ifndef T
 #define T uchar
+#endif
+
+#ifndef BINS
+#define BINS 256
+#endif
+
+#ifndef WGS
+#define WGS 1024 // nv GTX 660 max WGS: 1024
+#endif
+
+#ifndef HISTS_COUNT  
+#define HISTS_COUNT 5 // nv GTX 660 max compute unit
 #endif
 
 // src_ptr: pointer to memory location of source image 
@@ -12,18 +24,18 @@
 // src_offset: 
 // total: total number of pixel?
 __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, int src_offset, int src_rows, int src_cols,
-                                  __global uchar * histptr, int total, int BINS, int HISTS_COUNT, int WGS)
+                                  __global uchar * histptr, int total)//, int BINS, int HISTS_COUNT, int WGS)
 {
     int lid = get_local_id(0);
     int id = get_global_id(0) * kercn;
     int gid = get_group_id(0);
-/*
-    int BINS = 256;
-    int HISTS_COUNT = 5; // nv GTX 660 HISTS_COUNT: 5
-    size_t WGS = 1024;   // nv GTX 660 WGS: 1024
-*/
-    //__local int localhist[BINS]; // variable length arrays are not supported in OpenCL...
-    __local int localhist[256];   
+
+    //printf("lid: %d", lid);
+    // int BINS = 256;
+    // int HISTS_COUNT = 5; // nv GTX 660 HISTS_COUNT: 5
+    // size_t WGS = 1024;   // nv GTX 660 WGS: 1024
+
+    __local int localhist[BINS];
 
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
@@ -81,4 +93,44 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
         hist[i] = localhist[i];
+}
+
+#ifndef HT
+#define HT int
+#endif
+
+#ifndef convertToHT
+#define convertToHT noconvert
+#endif
+
+__kernel void merge_histogram(__global const int * ghist, __global uchar * histptr, int hist_step, int hist_offset)
+{
+    int lid = get_local_id(0);
+
+    __global HT * hist = (__global HT *)(histptr + hist_offset);
+#if WGS >= BINS
+    HT res = (HT)(0);
+#else
+    #pragma unroll
+    for (int i = lid; i < BINS; i += WGS)
+        hist[i] = (HT)(0);
+#endif
+
+    #pragma unroll
+    for (int i = 0; i < HISTS_COUNT; ++i)
+    {
+        #pragma unroll
+        for (int j = lid; j < BINS; j += WGS)
+#if WGS >= BINS
+            res += convertToHT(ghist[j]);
+#else
+            hist[j] += convertToHT(ghist[j]);
+#endif
+        ghist += BINS;
+    }
+
+#if WGS >= BINS
+    if (lid < BINS)
+        *(__global HT *)(histptr + mad24(lid, hist_step, hist_offset)) = res;
+#endif
 }
