@@ -4,16 +4,17 @@ Author: Wei-Yuan Alex Hsu
 Date:   2018/2/6 Tue
 Target: implement parallel( OpenCL based ) histogram equalization
 Reference:
-[1] [Opencv，Mat的研究:depth(), channels(), elemSize(), dims, step](http://dannysun-unknown.blogspot.tw/2016/02/opencvmatdepth-channels-elemsize-dims.html)
+[1] [Opencv，Mat的研究:depth(), channels(), elemSize(), dims,
+step](http://dannysun-unknown.blogspot.tw/2016/02/opencvmatdepth-channels-elemsize-dims.html)
 */
 //--------------------------------------------------------------
 #include "main.hpp"
 #include <CL/cl.h>
-#include <iostream> 
+#include <iostream>
+#include <opencv2/core/ocl.hpp>
+#include <opencv2/opencv.hpp>
 #include <stdlib.h> // exit
 #include <string.h> // fopen
-#include <opencv2/opencv.hpp>
-#include <opencv2/core/ocl.hpp>
 
 double get_event_exec_time(cl_event event)
 {
@@ -27,7 +28,7 @@ double get_event_exec_time(cl_event event)
     return total_time;
 }
 
-cl_program load_program(cl_context context, cl_device_id device, const char *filename)
+cl_program load_program(cl_context context, cl_device_id device, const char *filename, const char *flag)
 {
     FILE *     fp = fopen(filename, "rt");
     size_t     length;
@@ -55,7 +56,8 @@ cl_program load_program(cl_context context, cl_device_id device, const char *fil
     if (program == 0)
         return 0;
 
-    status = clBuildProgram(program, 0, 0, 0, 0, 0);
+    // reference: answer by genaganna (https://community.amd.com/thread/127773)
+    status = clBuildProgram(program, 0, 0, flag, 0, 0);
     if (status != CL_SUCCESS)
     {
         printf("Error:  Building Program from file %s\n", filename);
@@ -133,14 +135,14 @@ bool get_cl_context(cl_context *context, cl_device_id **devices, int num_platfor
 }
 
 void release_hist_opencl(cl_context context, cl_command_queue queue, cl_program program, cl_mem cl_a, cl_mem cl_b,
-                    /*cl_mem cl_res,*/ cl_kernel adder)
+                         /*cl_mem cl_res,*/ cl_kernel adder)
 {
     clReleaseContext(context);
     clReleaseCommandQueue(queue);
     clReleaseProgram(program);
     clReleaseMemObject(cl_a);
     clReleaseMemObject(cl_b);
-    //clReleaseMemObject(cl_res);
+    // clReleaseMemObject(cl_res);
     clReleaseKernel(adder);
 
     exit(EXIT_FAILURE);
@@ -149,40 +151,55 @@ void release_hist_opencl(cl_context context, cl_command_queue queue, cl_program 
 int main(int argc, char **argv)
 {
     // type in input file after call executable file
-    std::string input_file = std::string(argv[1]); 
-    if(input_file.empty() == true)
+    std::string input_file = std::string(argv[1]);
+    if (input_file.empty() == true)
     {
         std::cout << "Error opening file, please type in input file path and its filename" << std::endl;
         return -1; // if it is exit(), no destructor will be called for my locally scoped objects!
-    }        
-    // Read the file
-    // cv::Mat C = (cv::Mat_<double>(3,3) << 0, -1, 0, -1, 5, -1, 0, -1, 0); //manual
-    int bins = 256; // 256 gray scale level
-    cv::Mat src, resize_src, mat_hist(1, bins, CV_32SC1);
-    src = cv::imread(argv[1], CV_LOAD_IMAGE_COLOR);   
-    // Check for invalid input
-    if( !src.data )                                   
-    {
-        std::cout <<  "Could not open or find the image" << std::endl ;
-        return -1;
     }
 
-    cv::resize(src, resize_src, cv::Size(4,4), 0, 0, cv::INTER_CUBIC);    
+    // Read the file
+    // cv::Mat C = (cv::Mat_<double>(3,3) << 0, -1, 0, -1, 5, -1, 0, -1, 0); //manual
+    int     bins = 256; // 256 gray scale level
+    cv::Mat src, mat_hist(1, bins, CV_32SC1);
+
+    src = cv::imread(argv[1], CV_LOAD_IMAGE_COLOR);
+    // Check for invalid input
+    if (!src.data)
+    {
+        std::cout << "Could not open or find the image" << std::endl;
+        return -1;
+    }
 
     // OpenCL init
     cl_int           err     = 0;
     cl_context       context = 0;
     cl_device_id *   devices = NULL;
-    cl_program       program = 0;    
+    cl_program       program = 0;
     cl_mem           cl_mat = 0, cl_hist = 0;
-    cl_command_queue queue   = 0;
-    cl_kernel        ker_matToHistogram = 0;
-    cl_event         event;        
+    cl_command_queue queue        = 0;
+    cl_kernel        ker_calcHist = 0, ker_mergeHist = 0;
+    cl_event         event;
+
+    const cv::ocl::Device &dev       = cv::ocl::Device::getDefault();
+    int                    compunits = dev.maxComputeUnits();  // max compute units
+    size_t                 wgs       = dev.maxWorkGroupSize(); // max work group
+    cv::Size               size      = src.size();
+    cv::InputArray         arr_src   = src;
+    size_t                 offset    = arr_src.offset();
+    bool                   use16     = size.width % 16 == 0 && offset % 16 == 0 && src.step % 16 == 0;
+    int                    kercn     = dev.isAMD() && use16 ? 16 : std::min(4, cv::ocl::predictOptimalVectorWidth(src));
+
+    std::cout << "HISTS_COUNT(= compunits) =" << cv::ocl::Device::getDefault().maxComputeUnits() << std::endl;
+    std::cout << "WGS =" << cv::ocl::Device::getDefault().maxWorkGroupSize() << std::endl;
+    std::cout << "offset: " << offset << std::endl;
+    std::cout << "use16: " << use16 << "(0: false, 1: true)" << std::endl;
+    std::cout << "kercn: " << kercn << std::endl;
 
     if (get_cl_context(&context, &devices, 0) == false)
     {
         std::cout << "Fail to create context" << std::endl;
-        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_matToHistogram);
+        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_calcHist);
     }
 
     // Specify the queue to be profile-able
@@ -190,128 +207,163 @@ int main(int argc, char **argv)
     if (queue == NULL)
     {
         std::cout << "Can't create command queue" << std::endl;
-        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_matToHistogram);
-    }    
+        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_calcHist);
+    }
 
-    program = load_program(context, devices[0], "histogram.cl");
+    // step[0]: all data size on a row = number of element in a row( src .cols ) * number of element in all channel(
+    // src.elemSize() )
+    // step[1]: data size per pixelresize_src
+    // if you see "int step = src.step" -> that means src.step[0]
+    cl_int src_step = src.step[0];
+    std::cout << "src_step = " << src.step[0] << std::endl;
+    cl_int  src_offset  = offset;
+    cl_int  src_rows    = src.rows;
+    cl_int  src_cols    = src.cols;
+    cl_int  total       = src.total();
+    cl_int  BINS        = bins;
+    cl_int  HISTS_COUNT = compunits;
+    cl_int  cl_kercn    = kercn;
+    cl_int  WGS         = wgs;
+    const char *sint = "int";
+    cl_char T           = (kercn == 4) ?  *sint : *cv::ocl::typeToStr(CV_8UC(kercn));
+    // _src.isContinuous() ? " -D HAVE_SRC_CONT" : ""
+
+    // build flag option
+    std::ostringstream oss;
+    oss << "-D BINS=" << BINS << " -D HISTS_COUNT=" << compunits << " -D WGS=" << wgs << 
+    " -D kercn=" << kercn << " -D T=" << (kercn == 4) ?  *sint : *cv::ocl::typeToStr(CV_8UC(kercn)) ;
+    
+    std::string s = oss.str();
+    std::cout << "flag: " << s << std::endl;
+    
+    const char *flag = s.c_str (); // c_str() return const char *
+    std::cout << "flag: " << flag << std::endl;
+    
+    program = load_program(context, devices[0], "histogram.cl", flag);
     if (program == NULL)
     {
         std::cout << "Fail to build program" << std::endl;
-        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_matToHistogram);
+        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_calcHist);
     }
-     
+
     // allocate memory space
-    cl_mat   = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uchar) * resize_src.cols * resize_src.rows , NULL, NULL);
-    cl_hist   = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(int) * bins, NULL, NULL);
+    cl_mat  = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uchar) * src.cols * src.rows, NULL, NULL);
+    cl_hist = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(int) * bins, NULL, NULL);
     if (cl_mat == 0 || cl_hist == 0)
     {
         std::cout << "Can't create OpenCL buffer" << std::endl;
-        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_matToHistogram);
+        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_calcHist);
     }
 
     //--------------------------------
     // enqueue write buffer
-    //--------------------------------    
-    if (clEnqueueWriteBuffer(queue, cl_mat, CL_TRUE, 0, sizeof(uchar) * resize_src.cols * resize_src.rows, cl_mat, 0, 0, 0) == CL_SUCCESS)
+    //--------------------------------
+    if (clEnqueueWriteBuffer(queue, cl_mat, CL_TRUE, 0, sizeof(uchar) * src.cols * src.rows, cl_mat, 0, 0, 0) ==
+        CL_SUCCESS)
     {
         std::cout << "Write Buffer cl_mat" << std::endl;
     }
     else
     {
         std::cout << "Fail to enqueue buffer cl_mat" << std::endl;
-        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_matToHistogram);
+        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_calcHist);
     }
 
-    ker_matToHistogram = clCreateKernel(program, "calculate_histogram", &err); //calculate_histogram: function name
+    //--------------------------------
+    // kernel: function calculate_histogram()
+    //--------------------------------
+    ker_calcHist = clCreateKernel(program, "calculate_histogram", &err); // calculate_histogram: function name
     if (err == CL_INVALID_KERNEL_NAME)
-        std::cout << "CL_INVALID_KERNEL_NAME" << std::endl;
-    if (ker_matToHistogram == NULL)
-        std::cout << "Can't load kernel" << std::endl;    
-    
-    std::cout << "HISTS_COUNT(= compunits) =" << cv::ocl::Device::getDefault().maxComputeUnits() << std::endl;
-    std::cout << "WGS ="  << cv::ocl::Device::getDefault().maxWorkGroupSize() << std::endl;
+        std::cout << "ker_calcHist: CL_INVALID_KERNEL_NAME" << std::endl;
+    if (ker_calcHist == NULL)
+        std::cout << "ker_calcHist: Can't loaresize_srcd kernel" << std::endl;
+    //--------------------------------
+    // kernel: function calculate_histogram()
+    //--------------------------------
+    ker_mergeHist = clCreateKernel(program, "merge_histogram", &err); // calculate_histogram: function name
+    if (err == CL_INVALID_KERNEL_NAME)
+        std::cout << "ker_mergeHist: CL_INVALID_KERNEL_NAME" << std::endl;
+    if (ker_calcHist == NULL)
+        std::cout << "ker_mergeHist: Can't load kernel" << std::endl;
 
-    // kernel argument
-    //__global const uchar * src_ptr, int src_step, int src_offset, 
+    // kernel argument:
+    //__global const uchar * src_ptr, int src_step, int src_offset,
     // int src_rows, int src_cols,
-    // __global uchar * histptr, int total          
-    
-    // step[0]: all data size on a row = number of element in a row( src .cols ) * number of element in all channel( src.elemSize() )
-    // step[1]: data size per pixel
-    // if you see "int step = src.step" -> that means src.step[0]     
-    cl_int src_step = resize_src.step[0];  
-    std::cout << "src_step = "  << resize_src.step[0] << std::endl;
-    cl_int src_offset = 0;
-    cl_int src_rows = resize_src.rows;
-    cl_int src_cols = resize_src.cols;
-    cl_int total = resize_src.rows * resize_src.cols;
-    cl_int clbins = bins;
-    cl_int HISTS_COUNT = 5;
-    cl_int WGS = 1024;
+    // __global uchar * histptr, int total
+    // int kercn, int WGS, char T
+    clSetKernelArg(ker_calcHist, 0, sizeof(cl_mem), &cl_mat);
+    clSetKernelArg(ker_calcHist, 1, sizeof(cl_int), &src_step);
+    clSetKernelArg(ker_calcHist, 2, sizeof(cl_int), &src_offset);
+    clSetKernelArg(ker_calcHist, 3, sizeof(cl_int), &src_rows);
+    clSetKernelArg(ker_calcHist, 4, sizeof(cl_int), &src_cols);
+    clSetKernelArg(ker_calcHist, 5, sizeof(cl_mem), &cl_hist);
+    clSetKernelArg(ker_calcHist, 6, sizeof(cl_int), &total);
+    // clSetKernelArg(ker_calcHist, 7, sizeof(cl_int), &BINS);
+    // clSetKernelArg(ker_calcHist, 8, sizeof(cl_int), &HISTS_COUNT);
+    // clSetKernelArg(ker_calcHist, 9, sizeof(cl_int), &cl_kercn);
+    // clSetKernelArg(ker_calcHist, 10, sizeof(cl_int), &WGS);
+    // clSetKernelArg(ker_calcHist, 11, sizeof(cl_char), &T);
 
-    clSetKernelArg(ker_matToHistogram, 0, sizeof(cl_mem), &cl_mat);
-    clSetKernelArg(ker_matToHistogram, 1, sizeof(cl_int), &src_step);
-    clSetKernelArg(ker_matToHistogram, 2, sizeof(cl_int), &src_offset);
-    clSetKernelArg(ker_matToHistogram, 3, sizeof(cl_int), &src_rows);
-    clSetKernelArg(ker_matToHistogram, 4, sizeof(cl_int), &src_cols);
-    clSetKernelArg(ker_matToHistogram, 5, sizeof(cl_mem), &cl_hist);
-    clSetKernelArg(ker_matToHistogram, 6, sizeof(cl_int), &total);  
-    
-    // clSetKernelArg(ker_matToHistogram, 7, sizeof(cl_int), &clbins);
-    // clSetKernelArg(ker_matToHistogram, 7, sizeof(cl_int), &HISTS_COUNT);
-    // clSetKernelArg(ker_matToHistogram, 8, sizeof(cl_int), &WGS);
-    
-    //set local and global workgroup sizes 
-    size_t localws[2] = {1, 1};
-    size_t globalws[2] = {resize_src.cols, resize_src.rows}; 
+    // set local and global workgroup sizes
+    size_t localws[2]  = {1, 1};
+    size_t globalws[2] = {src.cols, src.rows};
 
-    //execute the kernel
-    err = clEnqueueNDRangeKernel(queue, ker_matToHistogram, 1, 0, globalws, localws, 0, 0, &event);
-    if (clEnqueueNDRangeKernel(queue, ker_matToHistogram, 1, 0, globalws, localws, 0, 0, &event) != CL_SUCCESS)
+    // execute the kernel
+    err = clEnqueueNDRangeKernel(queue, ker_calcHist, 1, 0, globalws, localws, 0, 0, &event);
+    if (clEnqueueNDRangeKernel(queue, ker_calcHist, 1, 0, globalws, localws, 0, 0, &event) != CL_SUCCESS)
     {
         std::cout << "Can't enqueue kernel" << std::endl;
         std::cout << "err = " << err << std::endl;
-        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_matToHistogram);
-    }    
+        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_calcHist);
+    }
+    // kernel argument
+    //__global const int *ghist, __global uchar *histptr, int hist_step, int hist_offset
+
+    clSetKernelArg(ker_calcHist, 0, sizeof(cl_mem), &cl_mat);
+    clSetKernelArg(ker_calcHist, 1, sizeof(cl_int), &src_step);
+    clSetKernelArg(ker_calcHist, 2, sizeof(cl_int), &src_offset);
 
     //--------------------------------
     // read result
-    //--------------------------------    
-    if (clEnqueueReadBuffer(queue, cl_hist, CL_TRUE, 
-                            0, sizeof(float) * mat_hist.cols * mat_hist.rows, 
-                            mat_hist.data,  // initialize OpenCV Mat by mat_hist.data which contains output results of kernel
-                            0, 0, 0) != CL_SUCCESS) 
+    //--------------------------------
+    // enqueue ker_calcHist
+    if (clEnqueueReadBuffer(
+            queue, cl_hist, CL_TRUE, 0, sizeof(float) * mat_hist.cols * mat_hist.rows,
+            mat_hist.data, // initialize OpenCV Mat by mat_hist.data which contains output results of kernel
+            0, 0, 0) != CL_SUCCESS)
     {
         std::cout << "Can't read data from device" << std::endl;
-        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_matToHistogram);
+        release_hist_opencl(context, queue, program, cl_mat, cl_hist, ker_calcHist);
     }
+    // enqueue ker_mergeHist
 
     // difference between clFinish() ?
     clWaitForEvents(1, &event);
 
-    std::cout << "Execution Time: " <<  get_event_exec_time(event) << "ms" << std::endl;    
+    std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
 
     // Make sure everything is done before we do anything
-    clFinish(queue);    
-    
+    clFinish(queue);
+
     // output result
     // try printf() to check?
-    //std::cout << "mat_hist = " << mat_hist << std::endl;    
+    // std::cout << "mat_hist = " << mat_hist << std::endl;
     int i = 0;
     printf("mat_hist = [");
-    for(i = 0; i<bins; i++)
-    {        
-        printf("%.5f,", mat_hist.at<float>(1, i));        
+    for (i = 0; i < bins; i++)
+    {
+        printf("%.1f, ", mat_hist.at<float>(1, i));
     }
     printf("]");
-    
+
     // release resource
     clReleaseContext(context);
     clReleaseCommandQueue(queue);
     clReleaseProgram(program);
     clReleaseMemObject(cl_mat);
     clReleaseMemObject(cl_hist);
-    clReleaseKernel(ker_matToHistogram);
+    clReleaseKernel(ker_calcHist);
+    clReleaseKernel(ker_mergeHist);
 
     return 0;
 }

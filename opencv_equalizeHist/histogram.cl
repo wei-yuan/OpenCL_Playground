@@ -7,24 +7,24 @@
 #define T uchar
 #endif
 
-#ifndef BINS
-#define BINS 256
-#endif
+// #ifndef BINS
+// #define BINS 256
+// #endif
 
-#ifndef WGS
-#define WGS 1024 // nv GTX 660 max WGS: 1024
-#endif
+// #ifndef WGS
+// #define WGS 1024 // nv GTX 660 max WGS: 1024
+// #endif
 
-#ifndef HISTS_COUNT
-#define HISTS_COUNT 5 // nv GTX 660 max HISTS_COUNT: 5
-#endif
+// #ifndef HISTS_COUNT
+// #define HISTS_COUNT 5 // nv GTX 660 max HISTS_COUNT: 5
+// #endif
 
 // src_ptr: pointer to memory location of source image 
 // src_step: 
 // src_offset: 
 // total: total number of pixel?
 __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, int src_offset, int src_rows, int src_cols,
-                                  __global uchar * histptr, int total)//, int BINS, int HISTS_COUNT, int WGS)
+                                  __global uchar * histptr, int total/*, int BINS, int HISTS_COUNT, int kercn, int WGS, char T*/)
 {
     int lid = get_local_id(0);
     int id = get_global_id(0) * kercn;
@@ -32,9 +32,12 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
 
     __local int localhist[BINS]; 
 
-    #pragma unroll
+    // pragma unroll: loop unrolling, unrolling size WGS(= 1024) per iteration
+    // local histogram initialization
+    #pragma unroll    
     for (int i = lid; i < BINS; i += WGS)
         localhist[i] = 0;
+    // wait until every thread to finish
     barrier(CLK_LOCAL_MEM_FENCE);
 
     __global const uchar * src = src_ptr + src_offset;
@@ -85,7 +88,49 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
     barrier(CLK_LOCAL_MEM_FENCE);
 
     __global int *hist = (__global int *)(histptr + gid * BINS * (int)sizeof(int));
+    // combine all local histogram in a workgroup
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
         hist[i] = localhist[i];
+}
+
+#ifndef HT
+#define HT int
+#endif
+
+#ifndef convertToHT
+#define convertToHT noconvert
+#endif
+
+__kernel void merge_histogram(__global const int *ghist, __global uchar *histptr, int hist_step, int hist_offset, int WGS)
+{
+    int lid = get_local_id(0);
+  
+    __global HT * hist = (__global HT *)(histptr + hist_offset);
+
+#if WGS >= BINS
+    HT res = (HT)(0);
+#else
+    #pragma unroll
+    for (int i = lid; i < BINS; i += WGS)
+        hist[i] = (HT)(0);
+#endif
+    
+    #pragma unroll
+    for (int i = 0; i < HISTS_COUNT; ++i)
+    {
+        #pragma unroll
+        for(int j = lid; j < BINS; j += WGS)
+#if WGS >= BINS
+        res += convertToHT(ghist[j]);
+#else
+        hist[j] += convertToHT(ghist[j]);
+#endif
+        ghist += BINS;
+    }
+
+#if WGS >= BINS
+    if (lid < BINS)
+        *(__global HT *)(histptr + mad24(lid, hist_step, hist_offset)) = res;
+#endif
 }
