@@ -46,3 +46,4 @@ __kernel void merge_histogram(__global const int *ghist, __global uchar *histptr
     if (lid < BINS)
         *(__global HT *)(histptr + mad24(lid, hist_step, hist_offset)) = res;
 #endif
+}

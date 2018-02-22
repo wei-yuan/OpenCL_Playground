@@ -24,7 +24,7 @@
 // src_offset: 
 // total: total number of pixel?
 __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, int src_offset, int src_rows, int src_cols,
-                                  __global uchar * histptr, int total/*, int BINS, int HISTS_COUNT, int kercn, int WGS, char T*/)
+                                  __global uchar * histptr, int total)
 {
     int lid = get_local_id(0);
     int id = get_global_id(0) * kercn;
@@ -92,45 +92,4 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
         hist[i] = localhist[i];
-}
-
-#ifndef HT
-#define HT int
-#endif
-
-#ifndef convertToHT
-#define convertToHT noconvert
-#endif
-
-__kernel void merge_histogram(__global const int *ghist, __global uchar *histptr, int hist_step, int hist_offset, int WGS)
-{
-    int lid = get_local_id(0);
-  
-    __global HT * hist = (__global HT *)(histptr + hist_offset);
-
-#if WGS >= BINS
-    HT res = (HT)(0);
-#else
-    #pragma unroll
-    for (int i = lid; i < BINS; i += WGS)
-        hist[i] = (HT)(0);
-#endif
-    
-    #pragma unroll
-    for (int i = 0; i < HISTS_COUNT; ++i)
-    {
-        #pragma unroll
-        for(int j = lid; j < BINS; j += WGS)
-#if WGS >= BINS
-        res += convertToHT(ghist[j]);
-#else
-        hist[j] += convertToHT(ghist[j]);
-#endif
-        ghist += BINS;
-    }
-
-#if WGS >= BINS
-    if (lid < BINS)
-        *(__global HT *)(histptr + mad24(lid, hist_step, hist_offset)) = res;
-#endif
 }
