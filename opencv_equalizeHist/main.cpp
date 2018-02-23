@@ -165,7 +165,7 @@ int main(int argc, char **argv)
 
     // Read the file
     // cv::Mat C = (cv::Mat_<double>(3,3) << 0, -1, 0, -1, 5, -1, 0, -1, 0); // 2d mat manual
-    cv::Mat src, mat_hist(1, BINS, CV_32SC1), dst;
+    cv::Mat src, dst; // ghist -> 3 channels?
 
     src = cv::imread(argv[1], CV_LOAD_IMAGE_COLOR);
     // Check for invalid input
@@ -175,7 +175,9 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    int ddepth = CV_32S;
+    /// Separate the image in 3 places ( B, G and R )
+    vector<cv::Mat> bgr_planes;
+    split(src, bgr_planes);
 
     //-----------------------------------------------------------------------
     // kernel 1: function calculate_histogram()
@@ -190,6 +192,7 @@ int main(int argc, char **argv)
     cl_kernel        ker_calcHist = 0, ker_calcLUT = 0;
     cl_event         event;
 
+    int                    ddepth     = CV_32S;
     const cv::ocl::Device &dev        = cv::ocl::Device::getDefault();
     int                    compunits  = dev.maxComputeUnits();  // max compute units
     size_t                 wgs        = dev.maxWorkGroupSize(); // max work group
@@ -205,6 +208,8 @@ int main(int argc, char **argv)
     std::cout << "offset: " << offset << std::endl;
     std::cout << "use16: " << use16 << "(0: false, 1: true)" << std::endl;
     std::cout << "kercn: " << kercn << std::endl;
+
+    cv::Mat ghist(1, BINS * compunits, CV_32SC1);
 
     if (get_cl_context(&context, &devices, 0) == false)
     {
@@ -226,15 +231,20 @@ int main(int argc, char **argv)
     // if you see "int step = src.step" -> that means src.step[0]
     cl_int src_step = src.step[0];
     std::cout << "src_step = " << src.step[0] << std::endl;
-    cl_int      src_offset  = offset;
-    cl_int      src_rows    = src.rows;
-    cl_int      src_cols    = src.cols;
-    cl_int      total       = src.total();
-    cl_int      HISTS_COUNT = compunits;
-    cl_int      cl_kercn    = kercn;
-    cl_int      WGS         = wgs;
-    const char *sint        = "int";
-    cl_char     T           = (kercn == 4) ? *sint : *cv::ocl::typeToStr(CV_8UC(kercn));
+    cl_int src_offset  = offset;
+    cl_int src_rows    = src.rows;
+    cl_int src_cols    = src.cols;
+    cl_int total       = src.total();
+    cl_int HISTS_COUNT = compunits;
+    cl_int cl_kercn    = kercn;
+    cl_int WGS         = wgs;
+
+    std::string sint = "int";
+    std::string T    = (kercn == 4) ? sint : cv::ocl::typeToStr(CV_8UC(kercn));
+
+    std::string stype = cv::ocl::typeToStr(CV_8UC(kercn));
+    std::cout << "T: " << T << std::endl;
+    std::cout << stype << std::endl;
 
     // build program flag option
     std::ostringstream oss_k1;
@@ -242,15 +252,12 @@ int main(int argc, char **argv)
            << "-D HISTS_COUNT=" << compunits << " "
            << "-D WGS=" << wgs << " "
            << "-D kercn=" << kercn << " "
-           << "-D T=" << (kercn == 4)
-        ? *sint
-        : *cv::ocl::typeToStr(CV_8UC(kercn));
+           << "-D T=" << T;
     if (src.isContinuous())
         oss_k1 << " "
                << "-D HAVE_SRC_CONT";
 
-    std::string s1 = oss_k1.str();
-    std::cout << "flag: " << s1 << std::endl;
+    std::string s1      = oss_k1.str();
     const char *flag_k1 = s1.c_str(); // c_str() return const char *
     std::cout << "flag: " << flag_k1 << std::endl;
 
@@ -262,28 +269,27 @@ int main(int argc, char **argv)
     }
 
     cl_src   = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uchar) * total, NULL, NULL);
-    cl_ghist = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int) * BINS, NULL, NULL);
+    cl_ghist = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * BINS * compunits, NULL, NULL);
     if (cl_src == 0 || cl_ghist == 0)
     {
         std::cout << "Can't create OpenCL buffer" << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_ghist, ker_calcHist);
     }
 
-    if (clEnqueueWriteBuffer(queue, cl_src, CL_TRUE, 0, sizeof(uchar) * total, src.data, 0, 0, 0) == CL_SUCCESS)
-    {
-        std::cout << "Enqueue Write Buffer cl_src" << std::endl;
-    }
-    else
+    if (clEnqueueWriteBuffer(queue, cl_src, CL_TRUE, 0, sizeof(uchar) * total, &bgr_planes[0], 0, 0, 0) != CL_SUCCESS)
     {
         std::cout << "Fail to enqueue buffer cl_mat" << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_ghist, ker_calcHist);
     }
 
     ker_calcHist = clCreateKernel(program, "calculate_histogram", &err); // calculate_histogram: function name
-    if (err == CL_INVALID_KERNEL_NAME)
-        std::cout << "ker_calcHist: CL_INVALID_KERNEL_NAME" << std::endl;
-    if (ker_calcHist == NULL)
-        std::cout << "ker_calcHist: Can't loaresize_srcd kernel" << std::endl;
+    if (err != CL_SUCCESS)
+    {
+        if (ker_calcHist == NULL)
+            std::cout << "ker_calcHist: Can't load kernel" << std::endl;
+        if (err == CL_INVALID_KERNEL_NAME)
+            std::cout << "ker_calcHist: CL_INVALID_KERNEL_NAME" << std::endl;
+    }
 
     // kernel argument:
     //__global const uchar * src_ptr, int src_step, int src_offset,
@@ -314,6 +320,28 @@ int main(int argc, char **argv)
     // clFinish() -> wait until first kernel to finish ???
     clFinish(queue);
 
+    // read result to ghist
+    if (clEnqueueReadBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(float) * ghist.cols * ghist.rows, ghist.data, 0, 0,
+                            0) != CL_SUCCESS)
+    {
+        std::cout << "Can't read data from device" << std::endl;
+        release_hist_opencl(context, queue, program, cl_src, cl_ghist, ker_calcHist);
+    }
+
+    // clFinish() -> wait until first kernel to finish ???
+    clFinish(queue);
+
+    // output result
+    // try printf() to check?
+    // std::cout << "mat_hist = " << mat_hist << std::endl;
+    int i = 0;
+    printf("ghist = [");
+    for (i = 0; i < BINS; i++)
+    {
+        printf("%.1f, ", ghist.at<float>(1, i));
+    }
+    printf("]\n");
+
     // difference between clFinish() ?
     clWaitForEvents(1, &event);
     std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
@@ -325,103 +353,90 @@ int main(int argc, char **argv)
 
     // opencl init
     cl_mem cl_lut = 0, cl_hist = 0;
+    /*
+        // build program flag option
+        std::ostringstream oss_k2;
+        oss_k2 << "-D BINS=" << BINS << " "
+               << "-D HISTS_COUNT=" << compunits << " "
+               << "-D WGS=" << (int)wgs;
 
-    // build program flag option
-    std::ostringstream oss_k2;
-    oss_k2 << "-D BINS=" << BINS << " "
-           << "-D HISTS_COUNT=" << compunits << " "
-           << "-D WGS=" << (int)wgs;
+        std::string s2 = oss_k2.str();
+        std::cout << "s2: " << s2 << std::endl;
 
-    std::string s2 = oss_k2.str();
-    std::cout << "s2: " << s2 << std::endl;
+        const char *flag_k2 = s2.c_str(); // c_str() return const char *
+        std::cout << "flag_k2: " << flag_k2 << std::endl;
 
-    const char *flag_k2 = s2.c_str(); // c_str() return const char *
-    std::cout << "flag_k2: " << flag_k2 << std::endl;
+        // load program of second kernel
+        program = load_program(context, devices[0], "calcLUT.cl", flag_k2);
+        if (program == NULL)
+        {
+            std::cout << "Fail to build program for kernel 2" << std::endl;
+            //        release_hist_opencl(context, queue, program, cl_mat, hist, ker_calcHist);
+        }
 
-    // load program of second kernel
-    program = load_program(context, devices[0], "calcLUT.cl", flag_k2);
-    if (program == NULL)
-    {
-        std::cout << "Fail to build program for kernel 2" << std::endl;
-        //        release_hist_opencl(context, queue, program, cl_mat, hist, ker_calcHist);
-    }
+        // allocate memory space
+        cl_lut = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(uchar) * BINS, NULL, NULL);
+        if (cl_lut == 0)
+        {
+            std::cout << "Can't create OpenCL buffer cl_lut for kernel 2" << std::endl;
+            //        release_hist_opencl(context, queue, program, cl_mat, hist, ker_calcHist);
+        }
 
-    // allocate memory space
-    cl_lut = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(uchar) * BINS, NULL, NULL);
-    if (cl_lut == 0)
-    {
-        std::cout << "Can't create OpenCL buffer cl_lut for kernel 2" << std::endl;
-        //        release_hist_opencl(context, queue, program, cl_mat, hist, ker_calcHist);
-    }
+        if (clEnqueueWriteBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(uchar) * total, cl_src, 0, 0, 0) != CL_SUCCESS)
+        {
+            std::cout << "Fail to enqueue buffer cl_ghist for kernel 2" << std::endl;
+            //        release_hist_opencl(context, queue, program, cl_mat, hist, ker_calcHist);
+        }
 
-    if (clEnqueueWriteBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(uchar) * total, cl_src, 0, 0, 0) == CL_SUCCESS)
-    {
-        std::cout << "Write Buffer cl_ghist" << std::endl;
-    }
-    else
-    {
-        std::cout << "Fail to enqueue buffer cl_ghist for kernel 2" << std::endl;
-        //        release_hist_opencl(context, queue, program, cl_mat, hist, ker_calcHist);
-    }
+        ker_calcLUT = clCreateKernel(program, "merge_histogram", &err); // calculate_histogram: function name
+        if (err == CL_INVALID_KERNEL_NAME)
+            std::cout << "ker_calcLUT: CL_INVALID_KERNEL_NAME" << std::endl;
+        if (ker_calcLUT == NULL)
+            std::cout << "ker_calcLUT: Can't load kernel" << std::endl;
 
-    ker_calcLUT = clCreateKernel(program, "merge_histogram", &err); // calculate_histogram: function name
-    if (err == CL_INVALID_KERNEL_NAME)
-        std::cout << "ker_calcLUT: CL_INVALID_KERNEL_NAME" << std::endl;
-    if (ker_calcLUT == NULL)
-        std::cout << "ker_calcLUT: Can't load kernel" << std::endl;
+        // kernel argument
+        //__global const int *ghist, __global uchar *histptr, int hist_step, int hist_offset
+        clSetKernelArg(ker_calcLUT, 0, sizeof(cl_mem), &cl_lut);
+        clSetKernelArg(ker_calcLUT, 1, sizeof(cl_mem), &cl_ghist);
+        clSetKernelArg(ker_calcLUT, 2, sizeof(cl_int), &total);
 
-    // kernel argument
-    //__global const int *ghist, __global uchar *histptr, int hist_step, int hist_offset
-    clSetKernelArg(ker_calcLUT, 0, sizeof(cl_mem), &cl_lut);
-    clSetKernelArg(ker_calcLUT, 1, sizeof(cl_mem), &cl_ghist);
-    clSetKernelArg(ker_calcLUT, 2, sizeof(cl_int), &total);
+        // change value of wgs
+        wgs        = std::min<size_t>(cv::ocl::Device::getDefault().maxWorkGroupSize(), BINS);
+        localws[1] = {wgs};
 
-    // change value of wgs
-    wgs        = std::min<size_t>(cv::ocl::Device::getDefault().maxWorkGroupSize(), BINS);
-    localws[1] = {wgs};
-    // execute the kernelcv::UMat umat_src = src.getUMat(cv::ACCESS_READ);
-    err = clEnqueueNDRangeKernel(queue, ker_calcLUT, 1, 0, globalws, localws, 0, 0, &event);
-    if (clEnqueueNDRangeKernel(queue, ker_calcLUT, 1, 0, globalws, localws, 0, 0, &event) != CL_SUCCESS)
-    {
-        std::cout << "Can't enqueue kernel ker_calcLUT" << std::endl;
-        std::cout << "err = " << err << std::endl;
-        release_hist_opencl(context, queue, program, cl_src, cl_ghist, ker_calcHist);
-    }
+        // execute the kernelcv::UMat umat_src = src.getUMat(cv::ACCESS_READ);
+        err = clEnqueueNDRangeKernel(queue, ker_calcLUT, 1, 0, globalws, localws, 0, 0, &event);
+        if (clEnqueueNDRangeKernel(queue, ker_calcLUT, 1, 0, globalws, localws, 0, 0, &event) != CL_SUCCESS)
+        {
+            std::cout << "Can't enqueue kernel ker_calcLUT" << std::endl;
+            std::cout << "err = " << err << std::endl;
+            release_hist_opencl(context, queue, program, cl_src, cl_ghist, ker_calcHist);
+        }
 
-    //-----------------------------------------------------------------------
-    // read result
-    //-----------------------------------------------------------------------
-    if (clEnqueueReadBuffer(queue, cl_lut, CL_TRUE, 0, sizeof(float) * mat_hist.cols * mat_hist.rows, lut.data, 0, 0,
-                            0) != CL_SUCCESS)
-    {
-        std::cout << "Can't read data from device" << std::endl;
-        release_hist_opencl(context, queue, program, cl_src, cl_hist, ker_calcHist);
-    }
+        //-----------------------------------------------------------------------
+        // read result
+        //-----------------------------------------------------------------------
+        if (clEnqueueReadBuffer(queue, cl_lut, CL_TRUE, 0, sizeof(float) * mat_hist.cols * mat_hist.rows, lut.data, 0,
+       0,
+                                0) != CL_SUCCESS)
+        {
+            std::cout << "Can't read data from device" << std::endl;
+            release_hist_opencl(context, queue, program, cl_src, cl_hist, ker_calcHist);
+        }
 
-    // difference between clFinish() ?
-    clWaitForEvents(1, &event);
-    std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
+        // difference between clFinish() ?
+        clWaitForEvents(1, &event);
+        std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
 
-    // Make sure everything is done before we do anything
-    clFinish(queue);
+        // Make sure everything is done before we do anything
+        clFinish(queue);
 
-    // mapping by look-up table
-    cv::LUT(src, lut, dst);
+        // mapping by look-up table
+        cv::LUT(src, lut, dst);
 
-    // output result
-    // try printf() to check?
-    // std::cout << "mat_hist = " << mat_hist << std::endl;
-    int i = 0;
-    printf("mat_hist = [");
-    for (i = 0; i < BINS; i++)
-    {
-        printf("%.1f, ", lut.at<uchar>(1, i));
-    }
-    printf("]");
-
-    cv::imshow("eqHist", dst);
-    cv::waitKey(0);
-
+        cv::imshow("eqHist", dst);
+        cv::waitKey(0);
+    */
     // release resource
     clReleaseContext(context);
     clReleaseCommandQueue(queue);

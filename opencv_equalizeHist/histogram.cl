@@ -7,22 +7,6 @@
 #define T uchar
 #endif
 
-// #ifndef BINS
-// #define BINS 256
-// #endif
-
-// #ifndef WGS
-// #define WGS 1024 // nv GTX 660 max WGS: 1024
-// #endif
-
-// #ifndef HISTS_COUNT
-// #define HISTS_COUNT 5 // nv GTX 660 max HISTS_COUNT: 5
-// #endif
-
-// src_ptr: pointer to memory location of source image 
-// src_step: 
-// src_offset: 
-// total: total number of pixel?
 __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, int src_offset, int src_rows, int src_cols,
                                   __global uchar * histptr, int total)
 {
