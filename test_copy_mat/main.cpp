@@ -4,6 +4,10 @@ Author: Wei-Yuan Alex Hsu
 Date:   2018/2/24 Sat
 Target: histogram equalization part1: implement parallel( OpenCL based ) histogram calculation
 Reference:
+[1] Passing Mat to OpenCL Kernels causes Segmentation fault: https://www.queryoverflow.gdn/query/passing-mat-to-opencl-kernels-causes-segmentation-fault-27_44300490.html
+[2] 使用OpenCL+OpenCV实现图像旋转（二）: http://blog.csdn.net/icamera0/article/details/71598323
+BGR color channel 
+[3] 【OpenCV】访问Mat图像中每个像素的值: http://blog.csdn.net/xiaowei_cqu/article/details/7771760
 */
 //--------------------------------------------------------------
 #include "main.hpp"
@@ -163,8 +167,8 @@ int main(int argc, char **argv)
 
     cv::Mat src, resz_src; // ghist -> 3 channels?
     // Read the file
-    // src = cv::imread(argv[1], CV_LOAD_IMAGE_COLOR);
-    src = cv::imread(argv[1], CV_BGR2GRAY);
+    src = cv::imread(argv[1], CV_LOAD_IMAGE_COLOR);
+    // src = cv::imread(argv[1], CV_BGR2GRAY);
     // Check for invalid input
     if (!src.data)
     {
@@ -172,11 +176,15 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    cv::Mat dst = cv::Mat::zeros(4, 4, CV_8UC1);
+    cv::Mat dst = cv::Mat::zeros(4, 4, CV_8U);
     resize(src, resz_src, dst.size(), 0, 0, CV_INTER_LINEAR);
 
+    /// Separate the image in 4 places ( B, G ,R and A)
+    vector<cv::Mat> bgra_planes;
+    cv::split(resz_src, bgra_planes);
+
     std::cout << "/*** Before ***/" << std::endl;
-    std::cout << "resz_src: \n" << resz_src << std::endl;
+    std::cout << "bgra_planes[0]: \n" << bgra_planes[0] << std::endl;
     printf("dst = \n");
     std::cout << dst << std::endl;
 
@@ -191,10 +199,6 @@ int main(int argc, char **argv)
     size_t                 offset     = arr_src.offset();
     bool                   use16      = size.width % 16 == 0 && offset % 16 == 0 && src.step % 16 == 0;
     int                    kercn = dev.isAMD() && use16 ? 16 : std::min(4, cv::ocl::predictOptimalVectorWidth(src));
-
-    /// Separate the image in 3 places ( B, G and R )
-    vector<cv::Mat> bgr_planes;
-    split(src, bgr_planes);
 
     std::string sint = "int";
     std::string T    = (kercn == 4) ? sint : cv::ocl::typeToStr(CV_8UC(kercn)); // opencl: uchar4
@@ -268,16 +272,16 @@ int main(int argc, char **argv)
     }
 
     cl_src =
-        clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(unsigned char) * resz_src.rows * resz_src.cols, NULL, NULL);
-    cl_dst = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(unsigned char) * dst.rows * dst.cols, NULL, NULL);
+        clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uchar) * resz_src.rows * resz_src.cols, NULL, NULL);
+    cl_dst = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(uchar) * dst.rows * dst.cols, NULL, NULL);
     if (cl_src == 0 || cl_dst == 0)
     {
         std::cout << "Can't create OpenCL buffer" << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_dst, ker_calcHist);
     }
 
-    if (clEnqueueWriteBuffer(queue, cl_src, CL_TRUE, 0, sizeof(unsigned char) * resz_src.rows * resz_src.cols,
-                             resz_src.data, 0, 0, 0) != CL_SUCCESS)
+    if (clEnqueueWriteBuffer(queue, cl_src, CL_TRUE, 0, sizeof(uchar) * resz_src.rows * resz_src.cols,
+                             bgra_planes[0].data, 0, 0, 0) != CL_SUCCESS)
     {
         std::cout << "Fail to enqueue buffer cl_mat" << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_dst, ker_calcHist);
@@ -325,7 +329,7 @@ int main(int argc, char **argv)
     // test code
     // Is mat.total OK?
     // CV_32S type: float    
-    if (clEnqueueReadBuffer(queue, cl_dst, CL_TRUE, 0, sizeof(unsigned char) * dst.rows * dst.cols, dst.data, 0, 0,
+    if (clEnqueueReadBuffer(queue, cl_dst, CL_TRUE, 0, sizeof(uchar) * dst.rows * dst.cols, dst.data, 0, 0,
                             0) != CL_SUCCESS)
     {
         std::cout << "Can't read data from device" << std::endl;
