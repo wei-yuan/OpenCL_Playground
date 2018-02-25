@@ -4,6 +4,10 @@ Author: Wei-Yuan Alex Hsu
 Date:   2018/2/24 Sat
 Target: histogram equalization part1: implement parallel( OpenCL based ) histogram calculation
 Reference:
+[1] Passing Mat to OpenCL Kernels causes Segmentation fault: https://www.queryoverflow.gdn/query/passing-mat-to-opencl-kernels-causes-segmentation-fault-27_44300490.html
+[2] 使用OpenCL+OpenCV实现图像旋转（二）: http://blog.csdn.net/icamera0/article/details/71598323
+BGR color channel 
+[3] 【OpenCV】访问Mat图像中每个像素的值: http://blog.csdn.net/xiaowei_cqu/article/details/7771760
 */
 //--------------------------------------------------------------
 #include "main.hpp"
@@ -163,7 +167,8 @@ int main(int argc, char **argv)
 
     cv::Mat src, resz_src; // ghist -> 3 channels?
     // Read the file
-    src = cv::imread(argv[1], CV_LOAD_IMAGE_COLOR);
+    // src = cv::imread(argv[1], CV_LOAD_IMAGE_COLOR);
+    src = cv::imread(argv[1], CV_BGR2GRAY);
     // Check for invalid input
     if (!src.data)
     {
@@ -171,13 +176,11 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    cv::Mat dst = cv::Mat::zeros(4, 4, src.type());    
-    resize(src, resz_src, dst.size(), 0, 0, CV_INTER_LINEAR);
-    std::cout << "/*** Before ***/" << std::endl;
-    std::cout << "resz_src: \n" << resz_src << std::endl;
-    printf("dst = \n");
-    std::cout << dst << std::endl;    
-    
+    resize(src, resz_src, cv::Size(4, 4), 0, 0, CV_INTER_LINEAR);
+
+    //cv::Mat dst = cv::Mat::zeros(cv::Size(4, 4), CV_8U);    
+    cv::Mat dst = cv::Mat::zeros(1, BINS, CV_32F);    
+
     // OpenCV init
     int                    ddepth     = CV_32S;
     const cv::ocl::Device &dev        = cv::ocl::Device::getDefault();
@@ -189,10 +192,13 @@ int main(int argc, char **argv)
     size_t                 offset     = arr_src.offset();
     bool                   use16      = size.width % 16 == 0 && offset % 16 == 0 && src.step % 16 == 0;
     int                    kercn = dev.isAMD() && use16 ? 16 : std::min(4, cv::ocl::predictOptimalVectorWidth(src));
-
-    /// Separate the image in 3 places ( B, G and R )
-    vector<cv::Mat> bgr_planes;
-    split(src, bgr_planes);
+    
+    cv::Mat ghist = cv::Mat::zeros(1, BINS * compunits, CV_32SC1);
+    std::cout << "/*** Before ***/" << std::endl;
+    std::cout << "resz_src: \n" << resz_src << std::endl;
+    std::cout << "ghist = " << std::endl;
+    std::cout << ghist << std::endl;
+    
 
     std::string sint = "int";
     std::string T    = (kercn == 4) ? sint : cv::ocl::typeToStr(CV_8UC(kercn)); // opencl: uchar4
@@ -225,7 +231,7 @@ int main(int argc, char **argv)
     cl_kernel        ker_calcHist = 0;
     cl_event         event;
 
-    cv::Mat ghist(1, BINS * compunits, CV_32SC1);
+    
 
     // step[0]: all data size on a row = number of element in a row( src .cols ) * number of element in all channel(
     // src.elemSize() )
@@ -235,7 +241,7 @@ int main(int argc, char **argv)
     std::cout << "src # channels = " << src.channels() << std::endl;
     std::cout << "src # rows * # channels = " << src.rows * src.channels() << std::endl;
     std::cout << "src_step = " << src.step[0] << std::endl;
-    cl_int src_step = src.step[0];    
+    cl_int src_step    = src.step[0];
     cl_int src_offset  = offset;
     cl_int src_rows    = src.rows;
     cl_int src_cols    = src.cols;
@@ -265,15 +271,17 @@ int main(int argc, char **argv)
         release_hist_opencl(context, queue, program, cl_src, cl_dst, ker_calcHist);
     }
 
-    cl_src   = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * resz_src.rows * resz_src.cols, NULL, NULL);
-    cl_dst   = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * dst.rows * dst.cols, NULL, NULL);
+    cl_src =
+        clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uchar) * resz_src.rows * resz_src.cols, NULL, NULL);
+    cl_dst = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * ghist.rows * ghist.cols, NULL, NULL);    
     if (cl_src == 0 || cl_dst == 0)
     {
         std::cout << "Can't create OpenCL buffer" << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_dst, ker_calcHist);
     }
 
-    if (clEnqueueWriteBuffer(queue, cl_src, CL_TRUE, 0, sizeof(uchar) * resz_src.rows * resz_src.cols, resz_src.data, 0, 0, 0) != CL_SUCCESS)
+    if (clEnqueueWriteBuffer(queue, cl_src, CL_TRUE, 0, sizeof(uchar) * resz_src.rows * resz_src.cols,
+                             resz_src.data, 0, 0, 0) != CL_SUCCESS)
     {
         std::cout << "Fail to enqueue buffer cl_mat" << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_dst, ker_calcHist);
@@ -302,42 +310,44 @@ int main(int argc, char **argv)
     clSetKernelArg(ker_calcHist, 6, sizeof(cl_int), &total);
 
     // set local and global workgroup sizes
-    // size_t globalws[1] = {globalsize};
-    size_t globalws[2] = {resz_src.rows, resz_src.cols};
+    size_t globalws[1] = {globalsize};
+    size_t localws[1] = {wgs};
+
+    //size_t globalws[2] = {resz_src.rows, resz_src.cols};
     //size_t localws[2]  = {1, 1};
 
     // execute the kernelcv::UMat umat_src = src.getUMat(cv::ACCESS_READ);
-    if (clEnqueueNDRangeKernel(queue, ker_calcHist, 2, 0, globalws, /*localws*/0, 0, 0, &event) != CL_SUCCESS)
+    if (clEnqueueNDRangeKernel(queue, ker_calcHist, 1, 0, globalws, localws, 0, 0, &event) != CL_SUCCESS)
     {
         std::cout << "Can't enqueue kernel ker_calcHist" << std::endl;
         std::cout << "err = " << err << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_dst, ker_calcHist);
     }
 
-    // clFinish() -> wait until first kernel to finish ???
+    // clFinish() -> wait until all kernels in queue finish
     clFinish(queue);
 
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    // test code    
-    // Is mat.total OK?
-    // CV_32S type: float
-    if (clEnqueueReadBuffer(queue, cl_dst, CL_TRUE, 0, sizeof(float) * dst.rows * dst.cols, dst.data, 0,
-                            0, 0) != CL_SUCCESS)
-    {
+    err = clEnqueueReadBuffer(queue, cl_dst, CL_TRUE, 0, sizeof(float) * ghist.rows * ghist.cols, ghist.data, 0, 0,
+                            0);
+    if (clEnqueueReadBuffer(queue, cl_dst, CL_TRUE, 0, sizeof(float) * ghist.rows * ghist.cols, ghist.data, 0, 0,
+                            0) != CL_SUCCESS)
+    {        
+        std::cout << "err #: " << err << std::endl;
         std::cout << "Can't read data from device" << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_dst, ker_calcHist);
     }
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     // clFinish() -> wait until first kernel to finish ???
     clFinish(queue);
 
+    // copy the output data from output buffer to Mat variable.
+    //memcpy(dst.data, cl_dst, dst.rows * dst.cols * sizeof(unsigned char));
+
     // output result
     // try printf() to check?
-    int i = 0;
     std::cout << "/*** After ***/" << std::endl;
-    std::cout << "dst" << std::endl;
-    std::cout << dst << std::endl;
+    std::cout << "ghist" << std::endl;
+    std::cout << ghist << std::endl;
 
     // difference between clFinish() ?
     clWaitForEvents(1, &event);
@@ -348,7 +358,7 @@ int main(int argc, char **argv)
     clReleaseCommandQueue(queue);
     clReleaseProgram(program);
     clReleaseMemObject(cl_src);
-    clReleaseMemObject(cl_dst);    
+    clReleaseMemObject(cl_dst);
     clReleaseKernel(ker_calcHist);
 
     return 0;

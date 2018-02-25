@@ -16,12 +16,12 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
 
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // test code
-    int global_id = get_global_id(0);
-    
-    histptr[global_id] = src_ptr[global_id];
+    // int x = get_global_id(0);
+    // int y = get_global_id(1);
+    // // copy
+    // histptr[y * get_global_size(0) + x] = src_ptr[y * get_global_size(0) + x];
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-/*
     __local int localhist[BINS]; 
 
     // pragma unroll: loop unrolling, unrolling size WGS(= 1024) per iteration
@@ -61,7 +61,7 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
 #if kercn >= 8
         atomic_inc(localhist + value.s4);
         atomic_inc(localhist + value.s5);
-        atomic_inc(localhist + value.s6);
+        atomic_inc(localhist + value.s6);CL_INVALID_VALUE
         atomic_inc(localhist + value.s7);
 #if kercn == 16
         atomic_inc(localhist + value.s8);
@@ -83,6 +83,5 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
     // combine all local histogram in a workgroup
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
-        hist[i] = localhist[i];
-*/        
+        hist[i] = localhist[i]; 
 }
