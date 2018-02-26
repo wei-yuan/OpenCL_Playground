@@ -15,6 +15,7 @@
         "slist": "cpp",
         "initializer_list": "cpp",
         "iosfwd": "cpp",
-        "typeinfo": "cpp"
+        "typeinfo": "cpp",
+        "iostream": "cpp"
     }
 }

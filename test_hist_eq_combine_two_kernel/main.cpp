@@ -9,6 +9,8 @@ https://www.queryoverflow.gdn/query/passing-mat-to-opencl-kernels-causes-segment
 [2] 使用OpenCL+OpenCV实现图像旋转（二）: http://blog.csdn.net/icamera0/article/details/71598323
 BGR color channel
 [3] 【OpenCV】访问Mat图像中每个像素的值: http://blog.csdn.net/xiaowei_cqu/article/details/7771760
+[4] glibc detected (double free): http://applezu.netdpi.net/2014/02/glibc-detected-double-free.html
+[5] Opencv - how to merge two images: https://stackoverflow.com/questions/33239669/opencv-how-to-merge-two-images
 */
 //--------------------------------------------------------------
 #include "main.hpp"
@@ -137,8 +139,8 @@ bool get_cl_context(cl_context *context, cl_device_id **devices, int num_platfor
     return true;
 }
 
-void release_hist_opencl(cl_context context, cl_command_queue queue, cl_program program, cl_mem cl_src, cl_mem cl_ghist, cl_mem cl_lut,
-                         cl_kernel adder)
+void release_hist_opencl(cl_context context, cl_command_queue queue, cl_program program, cl_mem cl_src, cl_mem cl_ghist,
+                         cl_mem cl_lut, cl_kernel adder)
 {
     clReleaseContext(context);
     clReleaseCommandQueue(queue);
@@ -166,20 +168,22 @@ int main(int argc, char **argv)
         return -1; // if it is exit(), no destructor will be called for my locally scoped objects!
     }
 
-    cv::Mat src, resz_src; // ghist -> 3 channels?    
+    cv::Mat input, gray, src; // ghist -> 3 channels?
     // Read the file
-    // src = cv::imread(argv[1], CV_LOAD_IMAGE_COLOR);
-    src = cv::imread(argv[1], CV_BGR2GRAY);
+    input = cv::imread(argv[1], CV_LOAD_IMAGE_COLOR);
+    cv::cvtColor(input, gray, CV_BGR2GRAY);
+
     // Check for invalid input
-    if (!src.data)
+    if (!input.data)
     {
         std::cout << "Could not open or find the image" << std::endl;
         return -1;
     }
 
+    std::cout << "src type:" << cv::ocl::typeToStr(src.type()) << std::endl;
     cv::Mat dst = cv::Mat::zeros(src.size(), src.type());
 
-    resize(src, resz_src, cv::Size(4, 4), 0, 0, CV_INTER_LINEAR);    
+    resize(gray, src, cv::Size(200, 200), 0, 0, CV_INTER_LINEAR);
 
     // OpenCV init
     int                    ddepth     = CV_32S;
@@ -194,8 +198,10 @@ int main(int argc, char **argv)
     int                    kercn = dev.isAMD() && use16 ? 16 : std::min(4, cv::ocl::predictOptimalVectorWidth(src));
 
     cv::Mat ghist = cv::Mat::zeros(1, BINS * compunits, CV_32SC1);
-    std::cout << "/*** Before ***/" << std::endl;
-    std::cout << "resz_src: \n" << resz_src << std::endl;
+    std::cout << "ghist type:" << cv::ocl::typeToStr(ghist.type()) << std::endl;
+
+    // std::cout << "/*** Before ***/" << std::endl;
+    // std::cout << "src: \n" << src << std::endl;
     // std::cout << "ghist = " << std::endl;
     // std::cout << ghist << std::endl;
 
@@ -221,12 +227,12 @@ int main(int argc, char **argv)
     // kernel 1: function calculate histogram
     //-----------------------------------------------------------------------
     // OpenCL init
-    
+
     // step[0]: all data size on a row = number of element in a row( src .cols ) * number of element in all channel(
     // src.elemSize() )
     // step[1]: data size per pixelresize_src
-    cl_int err = 0, src_step = src.step[0], src_offset = offset, src_rows = src.rows,
-           src_cols = src.cols, total = src.total(), HISTS_COUNT = compunits, cl_kercn = kercn, WGS = wgs;
+    cl_int err = 0, src_step = src.step[0], src_offset = offset, src_rows = src.rows, src_cols = src.cols,
+           total = src.total(), HISTS_COUNT = compunits, cl_kercn = kercn, WGS = wgs;
     cl_context       context = 0;
     cl_device_id *   devices = NULL;
     cl_program       program = 0;
@@ -262,16 +268,16 @@ int main(int argc, char **argv)
         release_hist_opencl(context, queue, program, cl_src, cl_ghist, cl_lut, kernel);
     }
 
-    cl_src = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uchar) * resz_src.rows * resz_src.cols, NULL, NULL);
-    cl_ghist = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * ghist.rows * ghist.cols, NULL, NULL);
+    cl_src   = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uchar) * src.rows * src.cols, NULL, NULL);
+    cl_ghist = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int) * ghist.rows * ghist.cols, NULL, NULL);
     if (cl_src == 0 || cl_ghist == 0)
     {
         std::cout << "Can't create OpenCL buffer" << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_ghist, cl_lut, kernel);
     }
 
-    if (clEnqueueWriteBuffer(queue, cl_src, CL_TRUE, 0, sizeof(uchar) * resz_src.rows * resz_src.cols, resz_src.data, 0,
-                             0, 0) != CL_SUCCESS)
+    if (clEnqueueWriteBuffer(queue, cl_src, CL_TRUE, 0, sizeof(uchar) * src.rows * src.cols, src.data, 0, 0, 0) !=
+        CL_SUCCESS)
     {
         std::cout << "Fail to enqueue buffer cl_mat" << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_ghist, cl_lut, kernel);
@@ -303,7 +309,7 @@ int main(int argc, char **argv)
     size_t globalws[1] = {globalsize};
     size_t localws[1]  = {wgs};
 
-    // execute the kernelcv::UMat umat_src = src.getUMat(cv::ACCESS_READ);
+    // execute the kernel
     if (clEnqueueNDRangeKernel(queue, kernel, 1, 0, globalws, localws, 0, 0, &event) != CL_SUCCESS)
     {
         std::cout << "Can't enqueue kernel kernel" << std::endl;
@@ -314,11 +320,9 @@ int main(int argc, char **argv)
     // clFinish() -> wait until all kernels in queue finish
     clFinish(queue);
 
-    err = clEnqueueReadBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(float) * ghist.rows * ghist.cols, ghist.data, 0, 0, 0);
-    if (clEnqueueReadBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(float) * ghist.rows * ghist.cols, ghist.data, 0, 0, 0) !=
+    if (clEnqueueReadBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(int) * ghist.rows * ghist.cols, ghist.data, 0, 0, 0) !=
         CL_SUCCESS)
     {
-        std::cout << "err #: " << err << std::endl;
         std::cout << "Can't read data from device" << std::endl;
         release_hist_opencl(context, queue, program, cl_src, cl_ghist, cl_lut, kernel);
     }
@@ -343,6 +347,7 @@ int main(int argc, char **argv)
     std::cout << "kernel 2: function calculate look up table(LUT)" << std::endl;
 
     cv::Mat lut(1, BINS, CV_8UC1);
+    std::cout << "lut type:" << cv::ocl::typeToStr(lut.type()) << std::endl;
 
     oss.str(std::string());
     oss << "-D BINS=" << BINS << " "
@@ -360,7 +365,7 @@ int main(int argc, char **argv)
         release_hist_opencl(context, queue, program, cl_src, cl_ghist, cl_lut, kernel);
     }
 
-    cl_lut = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(float) * lut.rows * lut.cols, NULL, NULL);
+    cl_lut = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(uchar) * lut.rows * lut.cols, NULL, NULL);
     if (cl_lut == 0)
     {
         std::cout << "Can't create OpenCL buffer" << std::endl;
@@ -386,11 +391,11 @@ int main(int argc, char **argv)
     clSetKernelArg(kernel, 2, sizeof(cl_int), &total);
 
     // group size
-    wgs = std::min<size_t>(cv::ocl::Device::getDefault().maxWorkGroupSize(), BINS);
+    wgs         = std::min<size_t>(cv::ocl::Device::getDefault().maxWorkGroupSize(), BINS);
     globalws[1] = {wgs};
-    localws[1] = {wgs};
+    localws[1]  = {wgs};
 
-    // execute the kernelcv::UMat umat_src = src.getUMat(cv::ACCESS_READ);
+    // execute the kernel
     if (clEnqueueNDRangeKernel(queue, kernel, 1, 0, globalws, localws, 0, 0, &event) != CL_SUCCESS)
     {
         std::cout << "Can't enqueue kernel kernel" << std::endl;
@@ -401,8 +406,7 @@ int main(int argc, char **argv)
     // clFinish() -> wait until all kernels in queue finish
     clFinish(queue);
 
-    err = clEnqueueReadBuffer(queue, cl_lut, CL_TRUE, 0, sizeof(float) * lut.rows * lut.cols, lut.data, 0, 0, 0);
-    if (clEnqueueReadBuffer(queue, cl_lut, CL_TRUE, 0, sizeof(float) * lut.rows * lut.cols, lut.data, 0, 0, 0) !=
+    if (clEnqueueReadBuffer(queue, cl_lut, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data, 0, 0, 0) !=
         CL_SUCCESS)
     {
         std::cout << "err #: " << err << std::endl;
@@ -421,19 +425,23 @@ int main(int argc, char **argv)
     std::cout << lut << std::endl;
 
     LUT(src, lut, dst);
-    cv::imshow("src", );
-    cv::waitKey(0);
-    cv::imshow("Histogram equalization", dst);
+
+    // merge two images
+    cv::Mat matDst(cv::Size(src.cols * 2, src.rows), src.type(), cv::Scalar::all(0)); // create a black image                      
+    src.copyTo(matDst(cv::Rect(0, 0, src.cols, src.rows))); // cv::Rect(x, y, width, height)
+    dst.copyTo(matDst(cv::Rect(src.cols, 0, src.cols, src.rows)));
+
+    cv::imshow("Original Image + Histogram equalization", matDst);
     cv::waitKey(0);
 
     // release resource
-    clReleaseContext(context);
-    clReleaseCommandQueue(queue);
+    clReleaseKernel(kernel);
     clReleaseProgram(program);
     clReleaseMemObject(cl_src);
     clReleaseMemObject(cl_ghist);
     clReleaseMemObject(cl_lut);
-    clReleaseKernel(kernel);
+    clReleaseCommandQueue(queue);
+    clReleaseContext(context);
 
     return 0;
 }
