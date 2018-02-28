@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "taskName": "Compile", // 任务名称，与launch.json的preLaunchTask相对应
+            "label": "Compile", // 任务名称，与launch.json的preLaunchTask相对应
             "command": "g++", // 如果用MinGW，编译C用gcc，编译c++用g++
             "args": [
                 "-g", // 生成和 debug 有关的信息
@@ -10,6 +10,9 @@
                 "-o", // 指定输出文件名，不加该参数则默认输出a.exe
                 "${workspaceRoot}/main",                 
                 "-Wall", // 开启额外警告
+                "`pkg-config --cflags opencv`",
+                "`pkg-config --libs opencv`",
+                "-lOpenCL",
                 //"-static-libgcc", // 静态链接
                 //"-fcolor-diagnostics",
                 "-std=c++98" // c++1z即c++17，C语言最新标准为c11，或根据自己的需要进行修改
