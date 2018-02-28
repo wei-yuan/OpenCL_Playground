@@ -443,10 +443,10 @@ int main(int argc, char **argv)
         return -1;
     }
     else
-    {        
+    {
         cv::Mat input, src;                                                          // input
         cv::Mat dst = cv::Mat::zeros(src.size(), src.type()), lut(1, BINS, CV_8UC1); // output
-        
+
         capture >> src; // 1 frame for init
 
         // video writer
@@ -467,12 +467,7 @@ int main(int argc, char **argv)
         cv::InputArray         arr_src    = src;
         size_t                 offset     = arr_src.offset();
         bool                   use16      = size.width % 16 == 0 && offset % 16 == 0 && src.step % 16 == 0;
-        //int                    kercn = dev.isAMD() && use16 ? 16 : std::min(4, cv::ocl::predictOptimalVectorWidth(src));
-        int kercn = 4;
-
-        std::cout << "dev.isAMD(): " << dev.isAMD() << std::endl;
-        std::cout << "cv::ocl::predictOptimalVectorWidth(src): " << cv::ocl::predictOptimalVectorWidth(arr_src) << std::endl;
-        std::cout << "std::min(4, cv::ocl::predictOptimalVectorWidth(src)): " << std::min(4, cv::ocl::predictOptimalVectorWidth(arr_src)) << std::endl;
+        int                    kercn = dev.isAMD() && use16 ? 16 : std::min(4, cv::ocl::predictOptimalVectorWidth(src));
 
         cv::Mat ghist = cv::Mat::zeros(1, BINS * compunits, CV_32SC1);
 
@@ -541,6 +536,8 @@ int main(int argc, char **argv)
         cl_src   = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uchar) * src.rows * src.cols, NULL, NULL);
         cl_ghist = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int) * ghist.rows * ghist.cols, NULL, NULL);
         cl_lut   = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(uchar) * lut.rows * lut.cols, NULL, NULL);
+        // double buffering
+
         if (cl_src == 0 || cl_ghist == 0 || cl_lut == 0)
         {
             std::cout << "Can't create OpenCL buffer" << std::endl;
@@ -604,6 +601,10 @@ int main(int argc, char **argv)
         size_t globalws_lut[1] = {wgs};
         size_t localws_lut[1]  = {wgs};
 
+        // event 1
+
+        // event 2
+
         ////////////////////////////////
         for (int i = 1; i < capture.get(CV_CAP_PROP_FRAME_COUNT); i++)
         {
@@ -613,63 +614,123 @@ int main(int argc, char **argv)
 
             cv::imshow("src", src);
 
-            if (input.empty()) // empty(): Returns true if the array has no elements.
+            if (input.empty()) // empty(): Returns true if the array has no elements.even
             {
                 std::cout << "input is empty..." << std::endl;
                 break;
             }
-
-            // execute the kernel
-            if (clEnqueueNDRangeKernel(queue, kernel_calculate_histogram, 1, 0, globalws_hist, localws_hist, 0, 0,
-                                       &event) != CL_SUCCESS)
+            // even frame
+            if (i % 2 == 0)
             {
-                std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
-                std::cout << "err = " << err << std::endl;
-                release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                    kernel_calculate_histogram, kernel_calcLUT);
+                // execute the kernel
+                if (clEnqueueNDRangeKernel(queue, kernel_calculate_histogram, 1, 0, globalws_hist, localws_hist, 0, 0,
+                                           &event) != CL_SUCCESS)
+                {
+                    std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
+                    std::cout << "err = " << err << std::endl;
+                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
+                                        kernel_calculate_histogram, kernel_calcLUT);
+                }
+
+                // clFinish() -> wait until first kernel to finish ???
+                clFinish(queue);
+
+                // // CL_TRUE: blocking until clEnqueueReadBuffer is OK
+                // if (clEnqueueReadBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(int) * ghist.rows * ghist.cols,
+                // ghist.data, 0,
+                //                         0, 0) != CL_SUCCESS)
+                // {
+                //     std::cout << "Can't read data from device" << std::endl;
+                //     release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
+                //                         kernel_calculate_histogram, kernel_calcLUT);
+                // }
+
+                // difference between clFinish() ?
+                clWaitForEvents(1, &event);
+                // std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
+
+                // execute the kernel
+                if (clEnqueueNDRangeKernel(queue, kernel_calcLUT, 1, 0, globalws_lut, localws_lut, 0, 0, &event) !=
+                    CL_SUCCESS)
+                {
+                    std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
+                    std::cout << "err = " << err << std::endl;
+                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
+                                        kernel_calculate_histogram, kernel_calcLUT);
+                }
+
+                // clFinish() -> wait until all kernels in queue finish
+                // clFinish(queue);
+
+                // CL_TRUE: blocking until everything is done
+                if (clEnqueueReadBuffer(queue, cl_lut, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data, 0, 0,
+                                        0) != CL_SUCCESS)
+                {
+                    std::cout << "err #: " << err << std::endl;
+                    std::cout << "Can't read data from device" << std::endl;
+                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
+                                        kernel_calculate_histogram, kernel_calcLUT);
+                }
+
+                clWaitForEvents(1, &event);
+                // std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
             }
-
-            // clFinish() -> wait until first kernel to finish ???
-            clFinish(queue);
-
-            // CL_TRUE: blocking until clEnqueueReadBuffer is OK
-            if (clEnqueueReadBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(int) * ghist.rows * ghist.cols, ghist.data, 0,
-                                    0, 0) != CL_SUCCESS)
+            // odd frame
+            if (i % 2 != 0)
             {
-                std::cout << "Can't read data from device" << std::endl;
-                release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                    kernel_calculate_histogram, kernel_calcLUT);
+                // execute the kernel
+                if (clEnqueueNDRangeKernel(queue, kernel_calculate_histogram, 1, 0, globalws_hist, localws_hist, 0, 0,
+                                           &event) != CL_SUCCESS)
+                {
+                    std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
+                    std::cout << "err = " << err << std::endl;
+                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
+                                        kernel_calculate_histogram, kernel_calcLUT);
+                }
+
+                // clFinish() -> wait until first kernel to finish ???
+                // clFinish(queue);
+
+                // CL_TRUE: blocking until clEnqueueReadBuffer is OK
+                // if (clEnqueueReadBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(int) * ghist.rows * ghist.cols,
+                // ghist.data, 0,
+                //                         0, 0) != CL_SUCCESS)
+                // {
+                //     std::cout << "Can't read data from device" << std::endl;
+                //     release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
+                //                         kernel_calculate_histogram, kernel_calcLUT);
+                // }
+
+                // difference between clFinish() ?
+                clWaitForEvents(1, &event);
+                // std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
+
+                // execute the kernel
+                if (clEnqueueNDRangeKernel(queue, kernel_calcLUT, 1, 0, globalws_lut, localws_lut, 0, 0, &event) !=
+                    CL_SUCCESS)
+                {
+                    std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
+                    std::cout << "err = " << err << std::endl;
+                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
+                                        kernel_calculate_histogram, kernel_calcLUT);
+                }
+
+                // clFinish() -> wait until all kernels in queue finish
+                // clFinish(queue);
+
+                // CL_TRUE: blocking until everything is done
+                if (clEnqueueReadBuffer(queue, cl_lut, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data, 0, 0,
+                                        0) != CL_SUCCESS)
+                {
+                    std::cout << "err #: " << err << std::endl;
+                    std::cout << "Can't read data from device" << std::endl;
+                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
+                                        kernel_calculate_histogram, kernel_calcLUT);
+                }
+
+                clWaitForEvents(1, &event);
+                // std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
             }
-
-            // difference between clFinish() ?
-            clWaitForEvents(1, &event);
-            // std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
-
-            // execute the kernel
-            if (clEnqueueNDRangeKernel(queue, kernel_calcLUT, 1, 0, globalws_lut, localws_lut, 0, 0, &event) !=
-                CL_SUCCESS)
-            {
-                std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
-                std::cout << "err = " << err << std::endl;
-                release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                    kernel_calculate_histogram, kernel_calcLUT);
-            }
-
-            // clFinish() -> wait until all kernels in queue finish
-            clFinish(queue);
-
-            // CL_TRUE: blocking until everything is done
-            if (clEnqueueReadBuffer(queue, cl_lut, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data, 0, 0,
-                                    0) != CL_SUCCESS)
-            {
-                std::cout << "err #: " << err << std::endl;
-                std::cout << "Can't read data from device" << std::endl;
-                release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                    kernel_calculate_histogram, kernel_calcLUT);
-            }
-
-            clWaitForEvents(1, &event);
-            // std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
 
             // Mapping using look up table(LUT)
             cv::LUT(src, lut, dst);
