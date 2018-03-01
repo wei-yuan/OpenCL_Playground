@@ -724,7 +724,7 @@ int main(int argc, char **argv)
             // convert to gray scale image
             cv::cvtColor(input, src, CV_BGR2GRAY);
             t2 = (double)cv::getTickCount();
-            total_timer_cvt = total_timer_capture + (double)( (t2 - t1) / cv::getTickFrequency() );
+            total_timer_cvt = total_timer_cvt + (double)( (t2 - t1) / cv::getTickFrequency() );
 
             if (input.empty()) // empty(): Returns true if the array has no elements.even
             {
