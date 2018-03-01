@@ -20,12 +20,9 @@ https://forums.khronos.org/showthread.php/7248-how-to-use-OpenCL-to-process-vide
 #include <CL/cl.h>
 #include <iostream>
 #include <opencv2/core/ocl.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/opencv.hpp>
 #include <stdlib.h> // exit
 #include <string.h> // fopen
-#include <utility>
 
 double get_event_exec_time(cl_event event)
 {
@@ -145,19 +142,25 @@ bool get_cl_context(cl_context *context, cl_device_id **devices, int num_platfor
     return true;
 }
 
-void release_hist_opencl(cl_context context, cl_command_queue queue, cl_program program_histogram,
-                         cl_program program_calcLUT, cl_mem cl_src, cl_mem cl_ghist, cl_mem cl_lut,
-                         cl_kernel kernel_calculate_histogram, cl_kernel kernel_calcLUT)
+void release_hist_opencl(cl_context context, cl_command_queue compute_queue, cl_command_queue data_queue,
+                         cl_program program_histogram, cl_program program_calcLUT, cl_mem cl_src, cl_mem cl_ghist_1,
+                         cl_mem cl_lut_1, cl_mem cl_ghist_2, cl_mem cl_lut_2, cl_kernel kernel_calculate_histogram_1,
+                         cl_kernel kernel_calcLUT_1, cl_kernel kernel_calculate_histogram_2, cl_kernel kernel_calcLUT_2)
 {
     clReleaseContext(context);
-    clReleaseCommandQueue(queue);
+    clReleaseCommandQueue(compute_queue);
+    clReleaseCommandQueue(data_queue);
     clReleaseProgram(program_histogram);
     clReleaseProgram(program_calcLUT);
     clReleaseMemObject(cl_src);
-    clReleaseMemObject(cl_ghist);
-    clReleaseMemObject(cl_lut);
-    clReleaseKernel(kernel_calculate_histogram);
-    clReleaseKernel(kernel_calcLUT);
+    clReleaseMemObject(cl_ghist_1);
+    clReleaseMemObject(cl_lut_1);
+    clReleaseMemObject(cl_ghist_2);
+    clReleaseMemObject(cl_lut_2);
+    clReleaseKernel(kernel_calculate_histogram_1);
+    clReleaseKernel(kernel_calcLUT_1);
+    clReleaseKernel(kernel_calculate_histogram_2);
+    clReleaseKernel(kernel_calcLUT_2);
 
     exit(EXIT_FAILURE);
 }
@@ -500,66 +503,84 @@ int main(int argc, char **argv)
         cl_context       context           = 0;
         cl_device_id *   devices           = NULL;
         cl_program       program_histogram = 0, program_calcLUT = 0;
-        cl_mem           cl_src = 0, cl_ghist = 0, cl_lut = 0;
-        cl_command_queue queue                      = 0;
-        cl_kernel        kernel_calculate_histogram = 0, kernel_calcLUT = 0;
-        cl_event         event;
-
+        cl_mem           cl_src = 0, cl_ghist_1 = 0, cl_lut_1 = 0, cl_ghist_2 = 0, cl_lut_2 = 0;
+        cl_command_queue compute_queue = 0, data_queue = 0;
+        cl_kernel        kernel_calculate_histogram_1 = 0, kernel_calcLUT_1 = 0, kernel_calculate_histogram_2 = 0,
+                  kernel_calcLUT_2 = 0;
+        // cl_event event; // event[2];
         cl_int err = 0, src_step = src.step[0], src_offset = offset, src_rows = src.rows, src_cols = src.cols,
                total = src.total();
+
         // create context
         if (get_cl_context(&context, &devices, 0) == false)
         {
             std::cout << "Fail to create context" << std::endl;
-            release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                kernel_calculate_histogram, kernel_calcLUT);
+            release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
         }
 
         // Specify the queue to be profile-able
-        queue = clCreateCommandQueue(context, devices[0], CL_QUEUE_PROFILING_ENABLE, 0);
-        if (queue == NULL)
+        compute_queue = clCreateCommandQueue(context, devices[0], CL_QUEUE_PROFILING_ENABLE, 0);
+        data_queue    = clCreateCommandQueue(context, devices[0], CL_QUEUE_PROFILING_ENABLE, 0);
+        if (compute_queue == NULL || data_queue == NULL)
         {
             std::cout << "Can't create command queue" << std::endl;
-            release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                kernel_calculate_histogram, kernel_calcLUT);
+            release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
         }
+
         // load program (kernel container)
         program_histogram = load_program(context, devices[0], "histogram.cl", flag_calculate_histogram);
         program_calcLUT   = load_program(context, devices[0], "calcLUT.cl", flag_calcLUT); // program of second kernel
         if (program_histogram == NULL || program_calcLUT == NULL)
         {
             std::cout << "Fail to build program" << std::endl;
-            release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                kernel_calculate_histogram, kernel_calcLUT);
+            release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
         }
 
-        cl_src   = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uchar) * src.rows * src.cols, NULL, NULL);
-        cl_ghist = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int) * ghist.rows * ghist.cols, NULL, NULL);
-        cl_lut   = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(uchar) * lut.rows * lut.cols, NULL, NULL);
+        cl_src = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(uchar) * src.rows * src.cols, NULL, NULL);
         // double buffering
-
-        if (cl_src == 0 || cl_ghist == 0 || cl_lut == 0)
+        cl_ghist_1 = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int) * ghist.rows * ghist.cols, NULL, NULL);
+        cl_lut_1   = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(uchar) * lut.rows * lut.cols, NULL, NULL);
+        cl_ghist_2 = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int) * ghist.rows * ghist.cols, NULL, NULL);
+        cl_lut_2   = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(uchar) * lut.rows * lut.cols, NULL, NULL);
+        if (cl_src == 0 || cl_ghist_1 == 0 || cl_lut_1 == 0 || cl_ghist_2 == 0 || cl_lut_2 == 0)
         {
             std::cout << "Can't create OpenCL buffer" << std::endl;
-            release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                kernel_calculate_histogram, kernel_calcLUT);
+            release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
         }
 
-        if (clEnqueueWriteBuffer(queue, cl_src, CL_TRUE, 0, sizeof(uchar) * src.rows * src.cols, src.data, 0, 0, 0) !=
-            CL_SUCCESS)
+        if (clEnqueueWriteBuffer(data_queue, cl_src, CL_TRUE, 0, sizeof(uchar) * src.rows * src.cols, src.data, 0, 0,
+                                 0) != CL_SUCCESS)
         {
             std::cout << "Fail to enqueue buffer cl_mat" << std::endl;
-            release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                kernel_calculate_histogram, kernel_calcLUT);
+            release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
         }
         //-----------------------------------------------------------------------
         // kernel 1: function calculate histogram
         //-----------------------------------------------------------------------
-        kernel_calculate_histogram =
+        kernel_calculate_histogram_1 =
             clCreateKernel(program_histogram, "calculate_histogram", &err); // calculate_histogram: function name
         if (err != CL_SUCCESS)
         {
-            if (kernel_calculate_histogram == NULL)
+            if (kernel_calculate_histogram_1 == NULL)
+                std::cout << "kernel_calculate_histogram: Can't load kernel" << std::endl;
+            if (err == CL_INVALID_KERNEL_NAME)
+                std::cout << "kernel: CL_INVALID_KERNEL_NAME" << std::endl;
+        }
+        kernel_calculate_histogram_2 =
+            clCreateKernel(program_histogram, "calculate_histogram", &err); // calculate_histogram: function name
+        if (err != CL_SUCCESS)
+        {
+            if (kernel_calculate_histogram_2 == NULL)
                 std::cout << "kernel_calculate_histogram: Can't load kernel" << std::endl;
             if (err == CL_INVALID_KERNEL_NAME)
                 std::cout << "kernel: CL_INVALID_KERNEL_NAME" << std::endl;
@@ -568,29 +589,48 @@ int main(int argc, char **argv)
         //-----------------------------------------------------------------------
         // kernel 2: function calculate look up table(LUT)
         //-----------------------------------------------------------------------
-        kernel_calcLUT = clCreateKernel(program_calcLUT, "calcLUT", &err); // calculate_histogram: function name
+        kernel_calcLUT_1 = clCreateKernel(program_calcLUT, "calcLUT", &err); // calculate_histogram: function name
         if (err != CL_SUCCESS)
         {
-            if (kernel_calcLUT == NULL)
+            if (kernel_calcLUT_1 == NULL)
+                std::cout << "kernel: Can't load kernel kernel_calcLUT" << std::endl;
+            if (err == CL_INVALID_KERNEL_NAME)
+                std::cout << "kernel: CL_INVALID_KERNEL_NAME" << std::endl;
+        }
+        kernel_calcLUT_2 = clCreateKernel(program_calcLUT, "calcLUT", &err); // calculate_histogram: function name
+        if (err != CL_SUCCESS)
+        {
+            if (kernel_calcLUT_1 == NULL)
                 std::cout << "kernel: Can't load kernel kernel_calcLUT" << std::endl;
             if (err == CL_INVALID_KERNEL_NAME)
                 std::cout << "kernel: CL_INVALID_KERNEL_NAME" << std::endl;
         }
 
         // kernel argument of kernel_calculate_histogram:
-        clSetKernelArg(kernel_calculate_histogram, 0, sizeof(cl_mem), &cl_src);
-        clSetKernelArg(kernel_calculate_histogram, 1, sizeof(cl_int), &src_step);
-        clSetKernelArg(kernel_calculate_histogram, 2, sizeof(cl_int), &src_offset);
-        clSetKernelArg(kernel_calculate_histogram, 3, sizeof(cl_int), &src_rows);
-        clSetKernelArg(kernel_calculate_histogram, 4, sizeof(cl_int), &src_cols);
-        clSetKernelArg(kernel_calculate_histogram, 5, sizeof(cl_mem), &cl_ghist);
-        clSetKernelArg(kernel_calculate_histogram, 6, sizeof(cl_int), &total);
+        clSetKernelArg(kernel_calculate_histogram_1, 0, sizeof(cl_mem), &cl_src);
+        clSetKernelArg(kernel_calculate_histogram_1, 1, sizeof(cl_int), &src_step);
+        clSetKernelArg(kernel_calculate_histogram_1, 2, sizeof(cl_int), &src_offset);
+        clSetKernelArg(kernel_calculate_histogram_1, 3, sizeof(cl_int), &src_rows);
+        clSetKernelArg(kernel_calculate_histogram_1, 4, sizeof(cl_int), &src_cols);
+        clSetKernelArg(kernel_calculate_histogram_1, 5, sizeof(cl_mem), &cl_ghist_1);
+        clSetKernelArg(kernel_calculate_histogram_1, 6, sizeof(cl_int), &total);
+
+        clSetKernelArg(kernel_calculate_histogram_2, 0, sizeof(cl_mem), &cl_src);
+        clSetKernelArg(kernel_calculate_histogram_2, 1, sizeof(cl_int), &src_step);
+        clSetKernelArg(kernel_calculate_histogram_2, 2, sizeof(cl_int), &src_offset);
+        clSetKernelArg(kernel_calculate_histogram_2, 3, sizeof(cl_int), &src_rows);
+        clSetKernelArg(kernel_calculate_histogram_2, 4, sizeof(cl_int), &src_cols);
+        clSetKernelArg(kernel_calculate_histogram_2, 5, sizeof(cl_mem), &cl_ghist_2);
+        clSetKernelArg(kernel_calculate_histogram_2, 6, sizeof(cl_int), &total);
 
         // kernel argument of kernel_calcLUT:
-        clSetKernelArg(kernel_calcLUT, 0, sizeof(cl_mem), &cl_lut);
-        clSetKernelArg(kernel_calcLUT, 1, sizeof(cl_mem), &cl_ghist);
-        clSetKernelArg(kernel_calcLUT, 2, sizeof(cl_int), &total);
-        // group size
+        clSetKernelArg(kernel_calcLUT_1, 0, sizeof(cl_mem), &cl_lut_1);
+        clSetKernelArg(kernel_calcLUT_1, 1, sizeof(cl_mem), &cl_ghist_1);
+        clSetKernelArg(kernel_calcLUT_1, 2, sizeof(cl_int), &total);
+
+        clSetKernelArg(kernel_calcLUT_2, 0, sizeof(cl_mem), &cl_lut_2);
+        clSetKernelArg(kernel_calcLUT_2, 1, sizeof(cl_mem), &cl_ghist_2);
+        clSetKernelArg(kernel_calcLUT_2, 2, sizeof(cl_int), &total);
 
         // set local and global workgroup sizes
         // kernel kernel_calculate_histogram
@@ -601,135 +641,172 @@ int main(int argc, char **argv)
         size_t globalws_lut[1] = {wgs};
         size_t localws_lut[1]  = {wgs};
 
-        // event 1
+        cl_event event[4], read_complete;
 
-        // event 2
+        ///////////////////////////////////////////////////////////////////////
+        //
+        // first frame
+        //
+        ///////////////////////////////////////////////////////////////////////       
+        // execute the kernel
+        if (clEnqueueNDRangeKernel(compute_queue, kernel_calculate_histogram_1, 1, 0, globalws_hist,
+                                    localws_hist, 0, 0, &event[0]) != CL_SUCCESS)
+        {
+            std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
+            std::cout << "err = " << err << std::endl;
+            release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
+        }
 
-        ////////////////////////////////
+        // difference between clFinish() ?
+        clWaitForEvents(1, &event[0]);
+        std::cout << "kernel_calculate_histogram_1 Execution Time: " << get_event_exec_time(event[0]) << "ms" << std::endl;
+
+        // execute the kernel, start to enqueue after event[0] ends
+        if (clEnqueueNDRangeKernel(compute_queue, kernel_calcLUT_1, 1, 0, globalws_lut, localws_lut, 1,
+                                    &event[0], &event[1]) != CL_SUCCESS)
+        {
+            std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
+            std::cout << "err = " << err << std::endl;
+            release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
+        }
+
+        clWaitForEvents(1, &event[1]);
+        std::cout << "kernel_calcLUT_1 Execution Time: " << get_event_exec_time(event[1]) << "ms" << std::endl;
+
+        // CL_TRUE: blocking until event[1] is done
+        if (clEnqueueReadBuffer(data_queue, cl_lut_1, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data,
+                                1, &event[1], &read_complete) != CL_SUCCESS)
+        {
+            std::cout << "err #: " << err << std::endl;
+            std::cout << "Can't read data from device" << std::endl;
+            release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
+        }     
+
+        clWaitForEvents(1, &read_complete);
+        std::cout << "clEnqueueReadBuffer 1 Execution Time: " << get_event_exec_time(read_complete) << "ms" << std::endl;
+
+        ///////////////////////////////////////////////////////////////////////
+        //
+        // Loop 
+        //
+        ///////////////////////////////////////////////////////////////////////
         for (int i = 1; i < capture.get(CV_CAP_PROP_FRAME_COUNT); i++)
         {
             // Read the file
             capture >> input;
             cv::cvtColor(input, src, CV_BGR2GRAY);
 
-            cv::imshow("src", src);
-
             if (input.empty()) // empty(): Returns true if the array has no elements.even
             {
                 std::cout << "input is empty..." << std::endl;
                 break;
             }
-            // even frame
-            if (i % 2 == 0)
-            {
-                // execute the kernel
-                if (clEnqueueNDRangeKernel(queue, kernel_calculate_histogram, 1, 0, globalws_hist, localws_hist, 0, 0,
-                                           &event) != CL_SUCCESS)
-                {
-                    std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
-                    std::cout << "err = " << err << std::endl;
-                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                        kernel_calculate_histogram, kernel_calcLUT);
-                }
-
-                // clFinish() -> wait until first kernel to finish ???
-                clFinish(queue);
-
-                // // CL_TRUE: blocking until clEnqueueReadBuffer is OK
-                // if (clEnqueueReadBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(int) * ghist.rows * ghist.cols,
-                // ghist.data, 0,
-                //                         0, 0) != CL_SUCCESS)
-                // {
-                //     std::cout << "Can't read data from device" << std::endl;
-                //     release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                //                         kernel_calculate_histogram, kernel_calcLUT);
-                // }
-
-                // difference between clFinish() ?
-                clWaitForEvents(1, &event);
-                // std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
-
-                // execute the kernel
-                if (clEnqueueNDRangeKernel(queue, kernel_calcLUT, 1, 0, globalws_lut, localws_lut, 0, 0, &event) !=
-                    CL_SUCCESS)
-                {
-                    std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
-                    std::cout << "err = " << err << std::endl;
-                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                        kernel_calculate_histogram, kernel_calcLUT);
-                }
-
-                // clFinish() -> wait until all kernels in queue finish
-                // clFinish(queue);
-
-                // CL_TRUE: blocking until everything is done
-                if (clEnqueueReadBuffer(queue, cl_lut, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data, 0, 0,
-                                        0) != CL_SUCCESS)
-                {
-                    std::cout << "err #: " << err << std::endl;
-                    std::cout << "Can't read data from device" << std::endl;
-                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                        kernel_calculate_histogram, kernel_calcLUT);
-                }
-
-                clWaitForEvents(1, &event);
-                // std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
-            }
+            ///////////////////////////////////////////////////////////////////////
+            //
             // odd frame
+            //
+            ///////////////////////////////////////////////////////////////////////
             if (i % 2 != 0)
             {
                 // execute the kernel
-                if (clEnqueueNDRangeKernel(queue, kernel_calculate_histogram, 1, 0, globalws_hist, localws_hist, 0, 0,
-                                           &event) != CL_SUCCESS)
+                if (clEnqueueNDRangeKernel(compute_queue, kernel_calculate_histogram_2, 1, 0, globalws_hist,
+                                           localws_hist, 0, 0, &event[2]) != CL_SUCCESS)
                 {
                     std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
                     std::cout << "err = " << err << std::endl;
-                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                        kernel_calculate_histogram, kernel_calcLUT);
+                    release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                        cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                        kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
                 }
-
-                // clFinish() -> wait until first kernel to finish ???
-                // clFinish(queue);
-
-                // CL_TRUE: blocking until clEnqueueReadBuffer is OK
-                // if (clEnqueueReadBuffer(queue, cl_ghist, CL_TRUE, 0, sizeof(int) * ghist.rows * ghist.cols,
-                // ghist.data, 0,
-                //                         0, 0) != CL_SUCCESS)
-                // {
-                //     std::cout << "Can't read data from device" << std::endl;
-                //     release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                //                         kernel_calculate_histogram, kernel_calcLUT);
-                // }
-
+                
                 // difference between clFinish() ?
-                clWaitForEvents(1, &event);
-                // std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
+                clWaitForEvents(1, &event[0]);
+                std::cout << "kernel_calculate_histogram_2 Execution Time: " << get_event_exec_time(event[0]) << "ms" << std::endl;
 
-                // execute the kernel
-                if (clEnqueueNDRangeKernel(queue, kernel_calcLUT, 1, 0, globalws_lut, localws_lut, 0, 0, &event) !=
-                    CL_SUCCESS)
+                // execute the kernel, start to enqueue when event[0] ends
+                if (clEnqueueNDRangeKernel(compute_queue, kernel_calcLUT_2, 1, 0, globalws_lut, localws_lut, 1,
+                                           &event[2], &event[3]) != CL_SUCCESS)
                 {
                     std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
                     std::cout << "err = " << err << std::endl;
-                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                        kernel_calculate_histogram, kernel_calcLUT);
+                    release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                        cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                        kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
                 }
 
-                // clFinish() -> wait until all kernels in queue finish
-                // clFinish(queue);
+                clWaitForEvents(1, &event[1]);
+                std::cout << "kernel_calcLUT_2 Execution Time: " << get_event_exec_time(event[1]) << "ms" << std::endl;
 
                 // CL_TRUE: blocking until everything is done
-                if (clEnqueueReadBuffer(queue, cl_lut, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data, 0, 0,
-                                        0) != CL_SUCCESS)
+                // It has to wait 
+                if (clEnqueueReadBuffer(data_queue, cl_lut_2, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data,
+                                        1, &event[3], &read_complete) != CL_SUCCESS)
                 {
                     std::cout << "err #: " << err << std::endl;
                     std::cout << "Can't read data from device" << std::endl;
-                    release_hist_opencl(context, queue, program_histogram, program_calcLUT, cl_src, cl_ghist, cl_lut,
-                                        kernel_calculate_histogram, kernel_calcLUT);
+                    release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                        cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                        kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
                 }
 
-                clWaitForEvents(1, &event);
-                // std::cout << "Execution Time: " << get_event_exec_time(event) << "ms" << std::endl;
+                clWaitForEvents(1, &read_complete);
+                std::cout << "clEnqueueReadBuffer 2 Execution Time: " << get_event_exec_time(read_complete) << "ms" << std::endl;
+            }            
+            ///////////////////////////////////////////////////////////////////////
+            //
+            // even frame
+            //
+            ///////////////////////////////////////////////////////////////////////
+            if (i % 2 == 0)
+            {
+                // execute the kernel
+                if (clEnqueueNDRangeKernel(compute_queue, kernel_calculate_histogram_1, 1, 0, globalws_hist,
+                                           localws_hist, 0, 0, &event[0]) != CL_SUCCESS)
+                {
+                    std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
+                    std::cout << "err = " << err << std::endl;
+                    release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                        cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                        kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
+                }
+
+                // difference between clFinish() ?
+                clWaitForEvents(1, &event[0]);
+                std::cout << "kernel_calculate_histogram_1 Execution Time: " << get_event_exec_time(event[0]) << "ms" << std::endl;
+
+                // execute the kernel, start to enqueue when event[0] ends
+                if (clEnqueueNDRangeKernel(compute_queue, kernel_calcLUT_1, 1, 0, globalws_lut, localws_lut, 1,
+                                           &event[0], &event[1]) != CL_SUCCESS)
+                {
+                    std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
+                    std::cout << "err = " << err << std::endl;
+                    release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                        cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                        kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
+                }
+
+                clWaitForEvents(1, &event[1]);
+                std::cout << "kernel_calcLUT_1 Execution Time: " << get_event_exec_time(event[1]) << "ms" << std::endl;
+
+                // CL_TRUE: blocking until everything is done
+                if (clEnqueueReadBuffer(data_queue, cl_lut_1, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data,
+                                        1, &event[1], &read_complete) != CL_SUCCESS)
+                {
+                    std::cout << "err #: " << err << std::endl;
+                    std::cout << "Can't read data from device" << std::endl;
+                    release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
+                                        cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
+                                        kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
+                }
+
+                clWaitForEvents(1, &read_complete);
+                std::cout << "clEnqueueReadBuffer 1 Execution Time: " << get_event_exec_time(read_complete) << "ms" << std::endl;                
             }
 
             // Mapping using look up table(LUT)
@@ -742,24 +819,32 @@ int main(int argc, char **argv)
 
             // write frame
             writer << dst;
-            // writer << src;
 
             cv::waitKey(30); // must wait if you want to show image
             cv::imshow("Histogram equalization", dst);
-            // cv::imshow("Histogram equalization", src);
         }
+        ////////////////////////////////
+
+        // clFinish() -> wait until all kernels in queue finish
+        clFinish(compute_queue);
+        clFinish(data_queue);
 
         // release resource
         // opencl
         clReleaseContext(context);
-        clReleaseCommandQueue(queue);
+        clReleaseCommandQueue(compute_queue);
+        clReleaseCommandQueue(data_queue);
         clReleaseProgram(program_histogram);
         clReleaseProgram(program_calcLUT);
         clReleaseMemObject(cl_src);
-        clReleaseMemObject(cl_ghist);
-        clReleaseMemObject(cl_lut);
-        clReleaseKernel(kernel_calculate_histogram);
-        clReleaseKernel(kernel_calcLUT);
+        clReleaseMemObject(cl_ghist_1);
+        clReleaseMemObject(cl_lut_1);
+        clReleaseMemObject(cl_ghist_2);
+        clReleaseMemObject(cl_lut_2);
+        clReleaseKernel(kernel_calculate_histogram_1);
+        clReleaseKernel(kernel_calcLUT_1);
+        clReleaseKernel(kernel_calculate_histogram_2);
+        clReleaseKernel(kernel_calcLUT_2);
         // opencv
         capture.release();       // When everything done, release the video capture object
         cv::destroyAllWindows(); // Closes all the frames
