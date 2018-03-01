@@ -672,9 +672,9 @@ int main(int argc, char **argv)
         }
 
         // difference between clFinish() ?
-        clWaitForEvents(1, &event[0]);
-        std::cout << "kernel_calculate_histogram_1 Execution Time: " << get_event_exec_time(event[0]) << "ms"
-                  << std::endl;
+        // clWaitForEvents(1, &event[0]);
+        // std::cout << "kernel_calculate_histogram_1 Execution Time: " << get_event_exec_time(event[0]) << "ms"
+        //           << std::endl;
 
         // execute the kernel, start to enqueue after event[0] ends
         if (clEnqueueNDRangeKernel(compute_queue, kernel_calcLUT_1, 1, 0, globalws_lut, localws_lut, 1, &event[0],
@@ -687,8 +687,8 @@ int main(int argc, char **argv)
                                 kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
         }
 
-        clWaitForEvents(1, &event[1]);
-        std::cout << "kernel_calcLUT_1 Execution Time: " << get_event_exec_time(event[1]) << "ms" << std::endl;
+        // clWaitForEvents(1, &event[1]);
+        // std::cout << "kernel_calcLUT_1 Execution Time: " << get_event_exec_time(event[1]) << "ms" << std::endl;
 
         // CL_TRUE: blocking until event[1] is done
         // is event_wait_list correct ???
@@ -702,9 +702,9 @@ int main(int argc, char **argv)
                                 kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
         }
 
-        clWaitForEvents(1, &read_complete);
-        std::cout << "clEnqueueReadBuffer 1 Execution Time: " << get_event_exec_time(read_complete) << "ms"
-                  << std::endl;
+        // clWaitForEvents(1, &read_complete);
+        // std::cout << "clEnqueueReadBuffer 1 Execution Time: " << get_event_exec_time(read_complete) << "ms"
+        //           << std::endl;
 
         ///////////////////////////////////////////////////////////////////////
         //
