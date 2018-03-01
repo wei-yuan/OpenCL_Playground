@@ -14,6 +14,9 @@ BGR color channel
 Video processing
 [6] how to use OpenCL to process video sequence one by one?:
 https://forums.khronos.org/showthread.php/7248-how-to-use-OpenCL-to-process-video-sequence-one-by-one
+[7] OpenCL, double buffering using two command-queues for a single device:
+https://stackoverflow.com/questions/42837065/opencl-double-buffering-using-two-command-queues-for-a-single-device
+[8] OpenCL Events: http://www.heterogeneouscompute.org/hipeac2011Presentations/OpenCL-events.pdf
 */
 //--------------------------------------------------------------
 #include "main.hpp"
@@ -23,6 +26,7 @@ https://forums.khronos.org/showthread.php/7248-how-to-use-OpenCL-to-process-vide
 #include <opencv2/opencv.hpp>
 #include <stdlib.h> // exit
 #include <string.h> // fopen
+#include <vector>
 
 double get_event_exec_time(cl_event event)
 {
@@ -447,6 +451,9 @@ int main(int argc, char **argv)
     }
     else
     {
+
+        double t1 = (double)cv::getTickCount();
+
         cv::Mat input, src;                                                          // input
         cv::Mat dst = cv::Mat::zeros(src.size(), src.type()), lut(1, BINS, CV_8UC1); // output
 
@@ -521,8 +528,10 @@ int main(int argc, char **argv)
         }
 
         // Specify the queue to be profile-able
-        compute_queue = clCreateCommandQueue(context, devices[0], CL_QUEUE_PROFILING_ENABLE, 0);
-        data_queue    = clCreateCommandQueue(context, devices[0], CL_QUEUE_PROFILING_ENABLE, 0);
+        compute_queue = clCreateCommandQueue(context, devices[0],
+                                             CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, 0);
+        data_queue = clCreateCommandQueue(context, devices[0],
+                                          CL_QUEUE_PROFILING_ENABLE | CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE, 0);
         if (compute_queue == NULL || data_queue == NULL)
         {
             std::cout << "Can't create command queue" << std::endl;
@@ -643,14 +652,17 @@ int main(int argc, char **argv)
 
         cl_event event[4], read_complete;
 
+        double t2 = (double)cv::getTickCount();
+        double time    = (t2 - t1) / cv::getTickFrequency();        
+
         ///////////////////////////////////////////////////////////////////////
         //
         // first frame
         //
-        ///////////////////////////////////////////////////////////////////////       
+        ///////////////////////////////////////////////////////////////////////
         // execute the kernel
-        if (clEnqueueNDRangeKernel(compute_queue, kernel_calculate_histogram_1, 1, 0, globalws_hist,
-                                    localws_hist, 0, 0, &event[0]) != CL_SUCCESS)
+        if (clEnqueueNDRangeKernel(compute_queue, kernel_calculate_histogram_1, 1, 0, globalws_hist, localws_hist, 0, 0,
+                                   &event[0]) != CL_SUCCESS)
         {
             std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
             std::cout << "err = " << err << std::endl;
@@ -661,11 +673,12 @@ int main(int argc, char **argv)
 
         // difference between clFinish() ?
         clWaitForEvents(1, &event[0]);
-        std::cout << "kernel_calculate_histogram_1 Execution Time: " << get_event_exec_time(event[0]) << "ms" << std::endl;
+        std::cout << "kernel_calculate_histogram_1 Execution Time: " << get_event_exec_time(event[0]) << "ms"
+                  << std::endl;
 
         // execute the kernel, start to enqueue after event[0] ends
-        if (clEnqueueNDRangeKernel(compute_queue, kernel_calcLUT_1, 1, 0, globalws_lut, localws_lut, 1,
-                                    &event[0], &event[1]) != CL_SUCCESS)
+        if (clEnqueueNDRangeKernel(compute_queue, kernel_calcLUT_1, 1, 0, globalws_lut, localws_lut, 1, &event[0],
+                                   &event[1]) != CL_SUCCESS)
         {
             std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
             std::cout << "err = " << err << std::endl;
@@ -678,30 +691,40 @@ int main(int argc, char **argv)
         std::cout << "kernel_calcLUT_1 Execution Time: " << get_event_exec_time(event[1]) << "ms" << std::endl;
 
         // CL_TRUE: blocking until event[1] is done
-        // is event_wait_list correct ???        
-        if (clEnqueueReadBuffer(data_queue, cl_lut_1, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data,
-                                1, &event[1], &read_complete) != CL_SUCCESS)
+        // is event_wait_list correct ???
+        if (clEnqueueReadBuffer(data_queue, cl_lut_1, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data, 1,
+                                &event[1], &read_complete) != CL_SUCCESS)
         {
             std::cout << "err #: " << err << std::endl;
             std::cout << "Can't read data from device" << std::endl;
             release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, cl_src,
                                 cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
                                 kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
-        }     
+        }
 
         clWaitForEvents(1, &read_complete);
-        std::cout << "clEnqueueReadBuffer 1 Execution Time: " << get_event_exec_time(read_complete) << "ms" << std::endl;
+        std::cout << "clEnqueueReadBuffer 1 Execution Time: " << get_event_exec_time(read_complete) << "ms"
+                  << std::endl;
 
         ///////////////////////////////////////////////////////////////////////
         //
-        // Loop 
+        // Loop
         //
         ///////////////////////////////////////////////////////////////////////
+        double total_timer_capture = 0, total_timer_cvt     = 0, total_timer_eqHist = 0;        
         for (int i = 1; i < capture.get(CV_CAP_PROP_FRAME_COUNT); i++)
         {
+            t1 = (double)cv::getTickCount();
             // Read the file
             capture >> input;
+            t2 = (double)cv::getTickCount();
+            total_timer_capture = total_timer_capture + (double)( (t2 - t1) / cv::getTickFrequency() );
+
+            t1 = (double)cv::getTickCount();
+            // convert to gray scale image
             cv::cvtColor(input, src, CV_BGR2GRAY);
+            t2 = (double)cv::getTickCount();
+            total_timer_cvt = total_timer_capture + (double)( (t2 - t1) / cv::getTickFrequency() );
 
             if (input.empty()) // empty(): Returns true if the array has no elements.even
             {
@@ -713,6 +736,7 @@ int main(int argc, char **argv)
             // odd frame
             //
             ///////////////////////////////////////////////////////////////////////
+            t1 = (double)cv::getTickCount();
             if (i % 2 != 0)
             {
                 // execute the kernel
@@ -725,10 +749,11 @@ int main(int argc, char **argv)
                                         cl_ghist_1, cl_lut_1, cl_ghist_2, cl_lut_2, kernel_calculate_histogram_1,
                                         kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
                 }
-                
+
                 // difference between clFinish() ?
-                clWaitForEvents(1, &event[0]);
-                std::cout << "kernel_calculate_histogram_2 Execution Time: " << get_event_exec_time(event[0]) << "ms" << std::endl;
+                // clWaitForEvents(1, &event[0]);
+                // std::cout << "kernel_calculate_histogram_2 Execution Time: " << get_event_exec_time(event[0]) << "ms"
+                //           << std::endl;
 
                 // execute the kernel, start to enqueue when event[0] ends
                 if (clEnqueueNDRangeKernel(compute_queue, kernel_calcLUT_2, 1, 0, globalws_lut, localws_lut, 1,
@@ -741,11 +766,11 @@ int main(int argc, char **argv)
                                         kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
                 }
 
-                clWaitForEvents(1, &event[1]);
-                std::cout << "kernel_calcLUT_2 Execution Time: " << get_event_exec_time(event[1]) << "ms" << std::endl;
+                // clWaitForEvents(1, &event[1]);
+                // std::cout << "kernel_calcLUT_2 Execution Time: " << get_event_exec_time(event[1]) << "ms" << std::endl;
 
                 // CL_TRUE: blocking until everything is done
-                // It has to wait 
+                // It has to wait
                 if (clEnqueueReadBuffer(data_queue, cl_lut_2, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data,
                                         1, &event[3], &read_complete) != CL_SUCCESS)
                 {
@@ -756,9 +781,10 @@ int main(int argc, char **argv)
                                         kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
                 }
 
-                clWaitForEvents(1, &read_complete);
-                std::cout << "clEnqueueReadBuffer 2 Execution Time: " << get_event_exec_time(read_complete) << "ms" << std::endl;
-            }            
+                // clWaitForEvents(1, &read_complete);
+                // std::cout << "clEnqueueReadBuffer 2 Execution Time: " << get_event_exec_time(read_complete) << "ms"
+                //           << std::endl;
+            }
             ///////////////////////////////////////////////////////////////////////
             //
             // even frame
@@ -777,9 +803,9 @@ int main(int argc, char **argv)
                                         kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
                 }
 
-                // difference between clFinish() ?
-                clWaitForEvents(1, &event[0]);
-                std::cout << "kernel_calculate_histogram_1 Execution Time: " << get_event_exec_time(event[0]) << "ms" << std::endl;
+                // clWaitForEvents(1, &event[0]);
+                // std::cout << "kernel_calculate_histogram_1 Execution Time: " << get_event_exec_time(event[0]) << "ms"
+                //           << std::endl;
 
                 // execute the kernel, start to enqueue when event[0] ends
                 if (clEnqueueNDRangeKernel(compute_queue, kernel_calcLUT_1, 1, 0, globalws_lut, localws_lut, 1,
@@ -792,8 +818,8 @@ int main(int argc, char **argv)
                                         kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
                 }
 
-                clWaitForEvents(1, &event[1]);
-                std::cout << "kernel_calcLUT_1 Execution Time: " << get_event_exec_time(event[1]) << "ms" << std::endl;
+                // clWaitForEvents(1, &event[1]);
+                // std::cout << "kernel_calcLUT_1 Execution Time: " << get_event_exec_time(event[1]) << "ms" << std::endl;
 
                 // CL_TRUE: blocking until everything is done
                 if (clEnqueueReadBuffer(data_queue, cl_lut_1, CL_TRUE, 0, sizeof(uchar) * lut.rows * lut.cols, lut.data,
@@ -806,32 +832,31 @@ int main(int argc, char **argv)
                                         kernel_calcLUT_1, kernel_calculate_histogram_2, kernel_calcLUT_2);
                 }
 
-                clWaitForEvents(1, &read_complete);
-                std::cout << "clEnqueueReadBuffer 1 Execution Time: " << get_event_exec_time(read_complete) << "ms" << std::endl;                
+                // clWaitForEvents(1, &read_complete);
+                // std::cout << "clEnqueueReadBuffer 1 Execution Time: " << get_event_exec_time(read_complete) << "ms"
+                //           << std::endl;
             }
 
             // Mapping using look up table(LUT)
             cv::LUT(src, lut, dst);
-
-            // merge two images
-            // cv::Mat matDst(cv::Size(src.cols * 2, src.rows), src.type(), cv::Scalar::all(0)); // create a black image
-            // src.copyTo(matDst(cv::Rect(0, 0, src.cols, src.rows))); // cv::Rect(x, y, width, height)
-            // dst.copyTo(matDst(cv::Rect(src.cols, 0, src.cols, src.rows)));
+            t2 = (double)cv::getTickCount();
+            total_timer_eqHist = total_timer_eqHist + (double)( (t2 - t1) / cv::getTickFrequency() );
 
             // write frame
-            writer << dst;
+            // writer << dst;
 
-            cv::waitKey(30); // must wait if you want to show image
-            cv::imshow("Histogram equalization", dst);
+            // cv::waitKey(30); // must wait if you want to show image
+            // cv::imshow("Histogram equalization", dst);
         }
         ////////////////////////////////
 
         // clFinish() -> wait until all kernels in queue finish
         clFinish(compute_queue);
         clFinish(data_queue);
-
+                
         // release resource
         // opencl
+        t1 = (double)cv::getTickCount();        
         clReleaseContext(context);
         clReleaseCommandQueue(compute_queue);
         clReleaseCommandQueue(data_queue);
@@ -846,9 +871,18 @@ int main(int argc, char **argv)
         clReleaseKernel(kernel_calcLUT_1);
         clReleaseKernel(kernel_calculate_histogram_2);
         clReleaseKernel(kernel_calcLUT_2);
+        t2 = (double)cv::getTickCount();
+        double re_time =  (double)( (t2 - t1) / cv::getTickFrequency() );    
+
         // opencv
         capture.release();       // When everything done, release the video capture object
         cv::destroyAllWindows(); // Closes all the frames
+
+        // output time
+        std::cout << "init_time: " << time << std::endl;                
+        std::cout << "total time of capture: " << total_timer_capture << ", total time of cvtcolor: " << total_timer_cvt
+                  << ", total time  of eqHist: " << total_timer_eqHist << std::endl;        
+        std::cout << "tolal time of release resource: " << re_time << std::endl;
     }
     return 0;
 }
