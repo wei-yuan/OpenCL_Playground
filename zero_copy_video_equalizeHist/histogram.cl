@@ -61,7 +61,7 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
 #if kercn >= 8
         atomic_inc(localhist + value.s4);
         atomic_inc(localhist + value.s5);
-        atomic_inc(localhist + value.s6);CL_INVALID_VALUE
+        atomic_inc(localhist + value.s6);
         atomic_inc(localhist + value.s7);
 #if kercn == 16
         atomic_inc(localhist + value.s8);
