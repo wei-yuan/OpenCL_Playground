@@ -316,28 +316,47 @@ int main(int argc, char **argv)
         // CL_MEM_USE_HOST_PTR: zero copy
         // buffer1 & buffer2: double buffering
         cl_src = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
-                                sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, src.data, NULL);
-        cl_ghist_1 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
-                                    sizeof(int) * ghist.rows * ghist.cols * num_of_image_per_batch, NULL, NULL);
-        cl_lut_1 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
-                                  sizeof(uchar) * lut.rows * lut.cols * num_of_image_per_batch, lut.data, NULL);
-        cl_dst_1 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
-                                  sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, dst_1.data, NULL);
-        cl_ghist_2 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
-                                    sizeof(int) * ghist.rows * ghist.cols * num_of_image_per_batch, NULL, NULL);
-        cl_lut_2 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
-                                  sizeof(uchar) * lut.rows * lut.cols * num_of_image_per_batch, lut.data, NULL);
-        cl_dst_2 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
-                                  sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, dst_2.data, NULL);
-        if (cl_src == 0 || cl_ghist_1 == 0 || cl_lut_1 == 0 || cl_dst_1 == 0 || cl_ghist_2 == 0 || cl_lut_2 == 0 ||
-            cl_dst_2 == 0)
+                                sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, src.data, &err);
+        if (cl_src == 0)
         {
-            std::cout << "Can't create OpenCL buffer" << std::endl;
+            std::cout << "Can't create OpenCL buffer cl_src" << std::endl;
+            std::cout << "err" << err << std::endl;
             release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, program_LUT,
                                 cl_src, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2, cl_dst_2,
                                 kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
                                 kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
         }
+        cl_ghist_1 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
+                                    sizeof(int) * ghist.rows * ghist.cols * num_of_image_per_batch, NULL, &err);
+        cl_lut_1 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
+                                  sizeof(uchar) * lut.rows * lut.cols * num_of_image_per_batch, lut.data, &err);
+        cl_ghist_2 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
+                                    sizeof(int) * ghist.rows * ghist.cols * num_of_image_per_batch, NULL, &err);
+        cl_lut_2 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
+                                  sizeof(uchar) * lut.rows * lut.cols * num_of_image_per_batch, lut.data, &err);        
+        if (cl_ghist_1 == 0 || cl_lut_1 == 0 || cl_ghist_2 == 0 || cl_lut_2 == 0 )
+        {
+            std::cout << "Can't create OpenCL buffer" << std::endl;
+            std::cout << "err" << err << std::endl;            
+            release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, program_LUT,
+                                cl_src, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2, cl_dst_2,
+                                kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
+                                kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
+        }                                  
+        cl_dst_1 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
+                                  sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, dst_1.data, NULL);        
+        cl_dst_2 = clCreateBuffer(context, CL_MEM_ALLOC_HOST_PTR,
+                                  sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, dst_2.data, NULL);        
+        if (cl_dst_1 == 0 || cl_dst_2 == 0)
+        {
+            std::cout << "dst error" << std::endl;            
+            std::cout << "err: " << err << std::endl;            
+            release_hist_opencl(context, compute_queue, data_queue, program_histogram, program_calcLUT, program_LUT,
+                                cl_src, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2, cl_dst_2,
+                                kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
+                                kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
+        }
+
 
         if (clEnqueueWriteBuffer(data_queue, cl_src, CL_TRUE, 0, sizeof(uchar) * src.rows * src.cols, src.data, 0, 0,
                                  0) != CL_SUCCESS)
