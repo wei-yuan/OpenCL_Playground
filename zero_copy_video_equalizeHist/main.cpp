@@ -299,10 +299,10 @@ int main(int argc, char **argv)
                                 kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
         }
 
-        // int num_of_image_per_batch = 1;
+        int num_of_image_per_batch = 5;
         // CL_MEM_USE_HOST_PTR: zero copy
         // buffer1 & buffer2: double buffering
-        cl_src = clCreateBuffer(context, CL_MEM_USE_HOST_PTR | CL_MEM_READ_ONLY, sizeof(uchar) * src.rows * src.cols,
+        cl_src = clCreateBuffer(context, CL_MEM_USE_HOST_PTR | CL_MEM_READ_ONLY, sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch,
                                 src.data, &err);
         if (cl_src == 0)
         {
@@ -677,8 +677,8 @@ int main(int argc, char **argv)
                 // clWaitForEvents(1, &read_complete);
                 // std::cout << "clEnqueueReadBuffer 2 Execution Time: " << get_event_exec_time(read_complete) << "ms"
                 //           << std::endl;
-                // cv::waitKey(30); // must wait if you want to show image
-                // cv::imshow("Histogram equalization", dst_2);
+                cv::waitKey(3); // must wait if you want to show image
+                cv::imshow("Histogram equalization", dst_2);
             }
             ///////////////////////////////////////////////////////////////////////
             //
@@ -751,8 +751,8 @@ int main(int argc, char **argv)
                 // clWaitForEvents(1, &read_complete);
                 // std::cout << "clEnqueueReadBuffer 1 Execution Time: " << get_event_exec_time(read_complete) << "ms"
                 //           << std::endl;
-                // cv::waitKey(30); // must wait if you want to show image
-                // cv::imshow("Histogram equalization", dst_1);
+                cv::waitKey(3); // must wait if you want to show image
+                cv::imshow("Histogram equalization", dst_1);
             }
 
             t2                 = cv::getTickCount();
