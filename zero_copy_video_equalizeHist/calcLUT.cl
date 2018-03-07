@@ -1,7 +1,13 @@
 // dst: pointer to memory location of destination image
 // ghist: input histogram ?
 // total: total number of pixel?
+#ifndef num_of_image_per_batch
+#define num_of_image_per_batch 1
+#endif
+
 __kernel void calcLUT(__global uchar * dst, __global const int * ghist, int total)
+{
+for(int i = 0; i < num_of_image_per_batch; i++)
 {
     int lid = get_local_id(0);
     __local int sumhist[BINS];
@@ -62,4 +68,5 @@ __kernel void calcLUT(__global uchar * dst, __global const int * ghist, int tota
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
         dst[i]= convert_uchar_sat_rte(convert_float(sumhist[i]) * scale);
+} // end for
 }

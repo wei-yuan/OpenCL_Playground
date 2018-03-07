@@ -10,17 +10,11 @@
 __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, int src_offset, int src_rows, int src_cols,
                                   __global uchar * histptr, int total)
 {
+for(int i = 0; i < num_of_image_per_batch; i++)
+{
     int lid = get_local_id(0);
     int id = get_global_id(0) * kercn;
     int gid = get_group_id(0);
-
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    // test code
-    // int x = get_global_id(0);
-    // int y = get_global_id(1);
-    // // copy
-    // histptr[y * get_global_size(0) + x] = src_ptr[y * get_global_size(0) + x];
-    // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     __local int localhist[BINS]; 
 
@@ -84,4 +78,5 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
         hist[i] = localhist[i]; 
+} // end for        
 }
