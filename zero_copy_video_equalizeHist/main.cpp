@@ -217,7 +217,8 @@ int main(int argc, char **argv)
 
         // video writer
         cv::Size videoSize = cv::Size(capture.get(CV_CAP_PROP_FRAME_WIDTH), capture.get(CV_CAP_PROP_FRAME_HEIGHT));
-        cv::VideoWriter writer("/home/paslab/opencl_output_file/integralImageVideoTest.avi",
+        std::string video_output_file = home_path + "opencl_output_file/integralImageVideoTest.avi";
+        cv::VideoWriter writer(video_output_file,
                                capture.get(CV_CAP_PROP_FOURCC), capture.get(CV_CAP_PROP_FPS), videoSize,
                                false); // false: turn of isColor flag of VideoWriter;
         std::cout << "Frames per second using video.get(CV_CAP_PROP_FPS) : " << capture.get(CV_CAP_PROP_FPS)
@@ -238,6 +239,7 @@ int main(int argc, char **argv)
         int      kercn   = dev.isAMD() && use16 ? 16 : std::min(4, cv::ocl::predictOptimalVectorWidth(src));
         // LUT
         int lcn = lut_1.channels(), dcn = src.channels(), ddepth = lut_1.depth();
+        std::cout << "compunits: " << compunits << ", wgs = " << wgs << ", globalsize: " << globalsize <<std::endl;        
 
         cv::Mat ghist_1 = cv::Mat::zeros(1, BINS * compunits, CV_32SC1), ghist_2 = cv::Mat::zeros(1, BINS * compunits, CV_32SC1);
 
@@ -491,7 +493,7 @@ int main(int argc, char **argv)
         size_t globalws_lut[2] = {(size_t)dst_1.cols * dcn / kercn, ((size_t)dst_1.rows + 3) / 4};
 
         // opencl event
-        cl_event event_odd[3], event_even[3], write_complete, read_complete;
+        cl_event event_odd[3], event_even[3];
 
         int64_t t2   = cv::getTickCount();
         double  time = (t2 - t1) / cv::getTickFrequency();
@@ -550,11 +552,10 @@ int main(int argc, char **argv)
         // Loop
         //
         ///////////////////////////////////////////////////////////////////////
-        double total_timer_capture = 0, total_timer_cvt = 0, total_timer_eqHist = 0;
-        
+        double total_timer_capture = 0, total_timer_cvt = 0, total_timer_eqHist = 0;        
+
         for (int i = 1; i < capture.get(CV_CAP_PROP_FRAME_COUNT); i++)
-        {
-            // std::cout << "i: " << i << std::endl;
+        {            
             t1 = cv::getTickCount();
             // Read the file
             capture >> input;
@@ -628,8 +629,8 @@ int main(int argc, char **argv)
                 // std::cout << "clEnqueueReadBuffer 2 Execution Time: " << get_event_exec_time(read_complete) << "ms"
                 //           << std::endl;
                 // writer << dst_2;                
-                cv::waitKey(30); // must wait if you want to show image
-                cv::imshow("Histogram equalization", dst_2);
+                // cv::waitKey(30); // must wait if you want to show image
+                // cv::imshow("Histogram equalization", dst_2);
             }
             ///////////////////////////////////////////////////////////////////////
             //
@@ -684,8 +685,8 @@ int main(int argc, char **argv)
                 //           << std::endl;
                 // write frame
                 // writer << dst_1;                
-                cv::waitKey(30); // must wait if you want to show image
-                cv::imshow("Histogram equalization", dst_1);
+                // cv::waitKey(30); // must wait if you want to show image
+                // cv::imshow("Histogram equalization", dst_1);
             }
 
             t2                 = cv::getTickCount();

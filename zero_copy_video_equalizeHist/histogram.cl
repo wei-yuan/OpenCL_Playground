@@ -9,9 +9,7 @@
 
 __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, int src_offset, int src_rows, int src_cols,
                                   __global uchar * histptr, int total)
-{
-for(int i = 0; i < num_of_image_per_batch; i++)
-{
+{    
     int lid = get_local_id(0);
     int id = get_global_id(0) * kercn;
     int gid = get_group_id(0);
@@ -22,11 +20,18 @@ for(int i = 0; i < num_of_image_per_batch; i++)
     // local histogram initialization
     #pragma unroll    
     for (int i = lid; i < BINS; i += WGS)
-        localhist[i] = 0;
+    {        
+        // if(get_global_id(0) == 0)
+        // {
+        //     printf("i = %d\n", i);
+        // }            
+        localhist[i] = 0;        
+    }        
     // wait until every thread to finish
     barrier(CLK_LOCAL_MEM_FENCE);
 
     __global const uchar * src = src_ptr + src_offset;
+
     int src_index;
 
     for (int grain = HISTS_COUNT * WGS * kercn; id < total; id += grain)
@@ -74,9 +79,9 @@ for(int i = 0; i < num_of_image_per_batch; i++)
     barrier(CLK_LOCAL_MEM_FENCE);
 
     __global int *hist = (__global int *)(histptr + gid * BINS * (int)sizeof(int));
+
     // combine all local histogram in a workgroup
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
         hist[i] = localhist[i]; 
-} // end for        
 }

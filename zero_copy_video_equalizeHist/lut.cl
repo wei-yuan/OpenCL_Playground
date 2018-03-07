@@ -115,8 +115,6 @@ __kernel void LUT(__global const uchar * srcptr, int src_step, int src_offset,
                   __global const uchar * lutptr, int lut_step, int lut_offset,
                   __global uchar * dstptr, int dst_step, int dst_offset, int rows, int cols)
 {
-for(int i = 0; i < num_of_image_per_batch; i++)
-{
     int x = get_global_id(0);
     int y = get_global_id(1) << 2; // << operator: shift left 2 = multiply 100
 
@@ -159,5 +157,4 @@ for(int i = 0; i < num_of_image_per_batch; i++)
         }
 
     }
-} // end for
 }

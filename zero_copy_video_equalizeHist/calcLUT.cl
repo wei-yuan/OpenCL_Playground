@@ -7,8 +7,6 @@
 
 __kernel void calcLUT(__global uchar * dst, __global const int * ghist, int total)
 {
-for(int i = 0; i < num_of_image_per_batch; i++)
-{
     int lid = get_local_id(0);
     __local int sumhist[BINS];
     __local float scale;
@@ -68,5 +66,4 @@ for(int i = 0; i < num_of_image_per_batch; i++)
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
         dst[i]= convert_uchar_sat_rte(convert_float(sumhist[i]) * scale);
-} // end for
 }
