@@ -182,6 +182,11 @@ enum
     BINS = 256
 };
 
+namespace OPENCV
+{
+
+};
+
 int main(int argc, char **argv)
 {
     // type in input file after call executable file
@@ -201,7 +206,13 @@ int main(int argc, char **argv)
     }
     else
     {
-
+int iteration = 10;
+double sum_init_time = 0, sum_total_timer_capture = 0, sum_total_timer_cvt = 0, sum_total_timer_eqHist= 0, sum_re_time = 0;
+for(int i=0; i<iteration; i++)
+{
+        
+        cv::VideoCapture capture(input_file);
+        
         int64_t t1 = cv::getTickCount();
     
         cv::Mat input, src; // input        
@@ -216,13 +227,13 @@ int main(int argc, char **argv)
         std::cout << "dst_1 size: " << dst_1.size() << std::endl;
 
         // video writer
-        cv::Size videoSize = cv::Size(capture.get(CV_CAP_PROP_FRAME_WIDTH), capture.get(CV_CAP_PROP_FRAME_HEIGHT));
-        std::string video_output_file = home_path + "opencl_output_file/integralImageVideoTest.avi";
-        cv::VideoWriter writer(video_output_file,
-                               capture.get(CV_CAP_PROP_FOURCC), capture.get(CV_CAP_PROP_FPS), videoSize,
-                               false); // false: turn of isColor flag of VideoWriter;
-        std::cout << "Frames per second using video.get(CV_CAP_PROP_FPS) : " << capture.get(CV_CAP_PROP_FPS)
-                  << std::endl;
+        // cv::Size videoSize = cv::Size(capture.get(CV_CAP_PROP_FRAME_WIDTH), capture.get(CV_CAP_PROP_FRAME_HEIGHT));
+        // std::string video_output_file = home_path + "opencl_output_file/integralImageVideoTest.avi";
+        // cv::VideoWriter writer(video_output_file,
+        //                        capture.get(CV_CAP_PROP_FOURCC), capture.get(CV_CAP_PROP_FPS), videoSize,
+        //                        false); // false: turn of isColor flag of VideoWriter;
+        // std::cout << "Frames per second using video.get(CV_CAP_PROP_FPS) : " << capture.get(CV_CAP_PROP_FPS)
+        //           << std::endl;
 
         ////////////////////////////////
         // OpenCV init
@@ -728,16 +739,59 @@ int main(int argc, char **argv)
         clReleaseKernel(kernel_LUT_2);
         t2             = cv::getTickCount();
         double re_time = (t2 - t1) / cv::getTickFrequency();
+        
+        // output time
+        std::cout << "init_time: " << time << std::endl;
+        std::cout << "total time of capture: " << total_timer_capture << ", total time of cvtcolor: " << total_timer_cvt
+                  << ", total time  of eqHist: " << total_timer_eqHist << std::endl;
+        std::cout << "tolal time of release resource: " << re_time << std::endl;       
+
+        sum_init_time += time; 
+        sum_total_timer_capture += total_timer_capture;
+        sum_total_timer_cvt += total_timer_cvt;
+        sum_total_timer_eqHist += total_timer_eqHist;
+        sum_re_time += re_time;
+}
+
+double sum_equalizeHist_time = 0, sum_opencv_timer_capture = 0;
+for(int i=0; i<iteration; i++)
+{        
+    for(int i = 1; i < capture.get(CV_CAP_PROP_FRAME_COUNT); i++)
+    {
+        cv::VideoCapture capture(input_file);
+        cv::Mat src, dst;
+        capture >> src;
+        // int64_t t1 = cv::getTickCount();
+        /// Convert to grayscale
+        cv::cvtColor( src, src, CV_BGR2GRAY );
+        // int64_t t2 = cv::getTickCount();
+        // double  cvt_time = (t2 - t1) / cv::getTickFrequency();
+        
+        int64_t t1 = cv::getTickCount();
+        /// Apply Histogram Equalization
+        cv::equalizeHist( src, dst );
+        int64_t t2 = cv::getTickCount();
+        double  equalizeHist_time = (t2 - t1) / cv::getTickFrequency();
+
+        // sum_opencv_timer_capture += cvt_time;        
+        sum_equalizeHist_time += equalizeHist_time;
+    }
+}
 
         // opencv
         capture.release();       // When everything done, release the video capture object
         cv::destroyAllWindows(); // Closes all the frames
 
         // output time
-        std::cout << "init_time: " << time << std::endl;
-        std::cout << "total time of capture: " << total_timer_capture << ", total time of cvtcolor: " << total_timer_cvt
-                  << ", total time  of eqHist: " << total_timer_eqHist << std::endl;
-        std::cout << "tolal time of release resource: " << re_time << std::endl;
+        std::cout << "*********OpenCL*********" << std::endl;
+        std::cout << "average init_time: " << sum_init_time / iteration << std::endl;
+        std::cout << "average time of capture: " << sum_total_timer_capture / iteration << ", average time of cvtcolor: " << sum_total_timer_cvt / iteration
+                  << ", average time  of eqHist: " << sum_total_timer_eqHist / iteration << std::endl;
+        std::cout << "average time of release resource: " << sum_re_time / iteration << std::endl;
+
+        std::cout << "*********OpenCV*********" << std::endl;
+        std::cout << "average cvtcolor time: " << sum_opencv_timer_capture / iteration << std::endl;
+        std::cout << "average equalizeHist time: " << sum_equalizeHist_time / iteration << std::endl;
     }
     return 0;
 }

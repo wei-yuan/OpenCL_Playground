@@ -193,14 +193,15 @@ int main(int argc, char **argv)
     }
     else
     {
-double sum_total_timer_capture = 0, sum_total_timer_cvt = 0, sum_total_timer_integral_image = 0, sum_re_time = 0;
-int iteration = 0;
+double sum_time = 0, sum_total_timer_capture = 0, sum_total_timer_cvt = 0, sum_total_timer_integral_image = 0, sum_re_time = 0;
+double iteration = 10;
 for(int i = 0; i<iteration; i++)
 {
-        int64_t t1 = cv::getTickCount();
+        cv::VideoCapture capture(input_file);
 
+        int64_t t1 = cv::getTickCount();
         cv::Mat input, src; // input        
-        capture >> input;   // 1 frame for init                
+        capture >> input;   // 1 frame for init                        
         cv::cvtColor(input, src, CV_BGR2GRAY);        
         cv::Mat dst_1 = cv::Mat::zeros(src.size(), src.type()), dst_2 = cv::Mat::zeros(src.size(), src.type());
         std::cout << "dst_1 size: " << dst_1.size() << std::endl;
@@ -399,7 +400,7 @@ for(int i = 0; i<iteration; i++)
 
         int64_t t2   = cv::getTickCount();
         double  time = (t2 - t1) / cv::getTickFrequency();
-
+        
         ///////////////////////////////////////////////////////////////////////
         //
         // first frame
@@ -416,11 +417,11 @@ for(int i = 0; i<iteration; i++)
                     cl_sum_2, kernel_sum_cols_1, kernel_sum_rows_1, kernel_sum_cols_2, kernel_sum_rows_2);
         }
         
-        // clFinish() -> wait until first kernel to finish ???        
-        clFinish(queue_1);
-        std::cout << "/*** After ***/" << std::endl;
-        std::cout << "buf_1: " << std::endl;
-        std::cout << buf_1 << std::endl;
+        // // clFinish() -> wait until first kernel to finish ???        
+        // clFinish(queue_1);
+        // std::cout << "/*** After ***/" << std::endl;
+        // std::cout << "buf_1: " << std::endl;
+        // std::cout << buf_1 << std::endl;
 
         // execute the kernel, start to enqueue after event[0] ends
         err = clEnqueueNDRangeKernel(queue_1, kernel_sum_rows_1, 1, 0, globalws_rows, 0, 1, &event_even[0],
@@ -442,20 +443,20 @@ for(int i = 0; i<iteration; i++)
         // Loop
         //
         ///////////////////////////////////////////////////////////////////////
-        double total_timer_capture = 0, total_timer_cvt = 0, total_timer_integral_image = 0;
+        double timer_capture = 0, timer_cvt = 0, timer_integral_image = 0;
         for (int i = 1; i < capture.get(CV_CAP_PROP_FRAME_COUNT); i++)
         {
             t1 = cv::getTickCount();
             // Read the file
             capture >> input;
             t2                  = cv::getTickCount();
-            total_timer_capture = total_timer_capture + ((t2 - t1) / cv::getTickFrequency());
+            timer_capture = (t2 - t1) / cv::getTickFrequency();
 
             t1 = cv::getTickCount();
             // convert to gray scale image
             cv::cvtColor(input, src, CV_BGR2GRAY);
             t2              = cv::getTickCount();
-            total_timer_cvt = total_timer_cvt + ((t2 - t1) / cv::getTickFrequency());
+            timer_cvt = (t2 - t1) / cv::getTickFrequency();
 
             if (input.empty()) // empty(): Returns true if the array has no elements.even
             {
@@ -532,7 +533,7 @@ for(int i = 0; i<iteration; i++)
             }
 
             t2                         = cv::getTickCount();
-            total_timer_integral_image = total_timer_integral_image + ((t2 - t1) / cv::getTickFrequency());
+            timer_integral_image = (t2 - t1) / cv::getTickFrequency();
 
             // write frame
             // writer << dst;
@@ -567,43 +568,48 @@ for(int i = 0; i<iteration; i++)
         double re_time = (t2 - t1) / cv::getTickFrequency();
         // output time
         std::cout << "init_time: " << time << std::endl;
-        std::cout << "total time of capture: " << total_timer_capture << ", total time of cvtcolor: " << total_timer_cvt
-                  << ", total time  of integral image: " << total_timer_integral_image << std::endl;
+        std::cout << "time of capture: " << timer_capture << ", time of cvtcolor: " << timer_cvt
+                  << ", time  of integral image: " << timer_integral_image << std::endl;
         std::cout << "tolal time of release resource: " << re_time << std::endl;
         
-        sum_total_timer_capture += total_timer_capture;
-        sum_total_timer_cvt += total_timer_cvt;
-        sum_total_timer_integral_image += total_timer_integral_image;
+        sum_total_timer_capture += timer_capture;
+        sum_total_timer_cvt += timer_cvt;
+        sum_total_timer_integral_image += timer_integral_image;
         sum_re_time += re_time;
 } 
 
 double sum_integral_time = 0;
 for(int i = 0; i<iteration; i++)
 {    
-    cv::VideoCapture capture(input_file);
-    cv::Mat input, src, sum;
+    for (int i = 1; i < capture.get(CV_CAP_PROP_FRAME_COUNT); i++)
+    {                
+        cv::VideoCapture capture(input_file);
+        cv::Mat input, src, sum;
 
-    capture >> input;
-    cvtColor(input, src, CV_BGR2GRAY);
-    
-    int64_t t1 = cv::getTickCount();
-    cv::integral(src, sum);
-    int64_t t2 = cv::getTickCount();
-    double integral_time = (t2 - t1) / cv::getTickFrequency();
-    sum_integral_time += integral_time;
+        capture >> input;
+        cvtColor(input, src, CV_BGR2GRAY);
+        
+        int64_t t1 = cv::getTickCount();
+        cv::integral(src, sum);
+        int64_t t2 = cv::getTickCount();
+        double integral_time = (t2 - t1) / cv::getTickFrequency();
+        sum_integral_time += integral_time;        
+    }
 }
         // opencv
         capture.release();       // When everything done, release the video capture object
         cv::destroyAllWindows(); // Closes all the frames
+        
+        double total_frame = iteration /  capture.get(CV_CAP_PROP_FRAME_COUNT);
 
         // output time
         std::cout << "**********OpenCL**********" << std::endl;
-        std::cout << "init_time: " << time << std::endl;
-        std::cout << "total time of capture: " << sum_total_timer_capture / iteration << ", total time of cvtcolor: " << sum_total_timer_cvt / iteration
-                  << ", total time  of integral image: " << sum_total_timer_integral_image / iteration << std::endl;
-        std::cout << "tolal time of release resource: " << sum_re_time / iteration << std::endl;
+        std::cout << "init_time: " << sum_time / iteration << std::endl;
+        std::cout << "total time of capture: " << sum_total_timer_capture / total_frame << ", total time of cvtcolor: " << sum_total_timer_cvt / total_frame
+                  << ", total time  of integral image: " << sum_total_timer_integral_image / total_frame << std::endl;
+        std::cout << "tolal time of release resource: " << sum_re_time / total_frame << std::endl;
         std::cout << "**********OpenCV**********" << std::endl;
-        std::cout << "average integral_time: " << sum_integral_time / iteration << std::endl;
+        std::cout << "average integral_time: " << sum_integral_time / total_frame << std::endl;
     }
     return 0;
 }
