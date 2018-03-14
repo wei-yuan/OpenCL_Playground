@@ -5,12 +5,13 @@
 #define num_of_image_per_batch 1
 #endif
 
-__kernel void calcLUT(__global uchar * dst, __global const int * ghist, int total)
+__kernel void calcLUT(__global uchar * dst, __global const int * ghist, int total, )
 {
     int lid = get_local_id(0);
     __local int sumhist[BINS];
     __local float scale;
 
+//  WGS: 256, BINS: 256
 #if WGS >= BINS
     int res = 0;
 #else
