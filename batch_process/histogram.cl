@@ -1,4 +1,5 @@
 // from: opencv/modules/imgproc/src/opencl/histogram.cl
+// special thanks: Andy Yang
 #ifndef kercn
 #define kercn 1
 #endif
@@ -8,7 +9,7 @@
 #endif
 
 __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, int src_offset, int src_rows, int src_cols,
-                                  __global uchar * histptr, int total)
+                                  __global uchar * histptr,  int hist_offset, int total)
 {    
     int lid = get_local_id(0);
     int id = get_global_id(0) * kercn;
@@ -20,8 +21,7 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
     // local histogram initialization
     #pragma unroll    
     for (int i = lid; i < BINS; i += WGS)
-    {        
-        //printf("i = %d\n", i);
+    {                
         localhist[i] = 0;        
     }        
     // wait until every thread to finish
@@ -75,10 +75,22 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
+    // add hist_offset at hist
+//     histptr += hist_offset;
+
     __global int *hist = (__global int *)(histptr + gid * BINS * (int)sizeof(int));
+
+    hist += hist_offset/4;
 
     // combine all local histogram in a workgroup
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
         hist[i] = localhist[i]; 
+
+    if(get_global_id(0) == 0)
+    {
+        #pragma unroll
+        for (int i = lid; i < BINS; i += WGS)
+                printf("hist[%d] = %d", i, hist[i]); 
+    }        
 }

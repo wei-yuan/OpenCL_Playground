@@ -5,7 +5,7 @@
 #define num_of_image_per_batch 1
 #endif
 
-__kernel void calcLUT(__global uchar * dst, __global const int * ghist, int total, )
+__kernel void calcLUT(__global uchar * dst, __global const int * ghist, int total )
 {
     int lid = get_local_id(0);
     __local int sumhist[BINS];
@@ -64,6 +64,7 @@ __kernel void calcLUT(__global uchar * dst, __global const int * ghist, int tota
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
+    // dst += dst_offset;
     #pragma unroll
     for (int i = lid; i < BINS; i += WGS)
         dst[i]= convert_uchar_sat_rte(convert_float(sumhist[i]) * scale);
