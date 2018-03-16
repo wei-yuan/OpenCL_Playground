@@ -19,10 +19,13 @@ https://stackoverflow.com/questions/42837065/opencl-double-buffering-using-two-c
 [8] OpenCL Events: http://www.heterogeneouscompute.org/hipeac2011Presentations/OpenCL-events.pdf
 [9] OpenCV - how to create Mat from uint8_t pointer:
 https://stackoverflow.com/questions/39579398/opencv-how-to-create-mat-from-uint8-t-pointer
+[10] OpenCV documentation says that “uchar” is “unsigned integer” datatype. How?:
+https://stackoverflow.com/questions/22115302/opencv-documentation-says-that-uchar-is-unsigned-integer-datatype-how
 */
 //--------------------------------------------------------------
 #include "main.hpp"
 #include <CL/cl.h>
+#undef NDEBUG
 #include <assert.h> // assert()
 #include <iostream>
 #include <opencv2/core/ocl.hpp>
@@ -197,18 +200,29 @@ float run_equalizeHist(cv::VideoCapture video)
     cv::Mat src;  // input
     video >> src; // 1 frame for init
     cv::cvtColor(src, src, CV_BGR2GRAY);
+
+    // Don't forget to get back to normal size
+    // cv::resize(src, src, cv::Size(100, 60), CV_INTER_LINEAR);
+
     std::cout << "src type: " << cv::ocl::typeToStr(src.type()) << std::endl;
 
-    int num_of_image_per_batch = 2;
+    // video writer
+    // cv::Size videoSize = cv::Size(capture.get(CV_CAP_PROP_FRAME_WIDTH), capture.get(CV_CAP_PROP_FRAME_HEIGHT));
+    // cv::VideoWriter writer("/home/alex/opencl_output_file/integralImageVideoTest.avi",
+    //                        capture.get(CV_CAP_PROP_FOURCC), capture.get(CV_CAP_PROP_FPS), videoSize,
+    //                        false); // false: turn of isColor flag of VideoWriter;
+    // std::cout << "Frames per second using video.get(CV_CAP_PROP_FPS) : " << capture.get(CV_CAP_PROP_FPS)
+    //           << std::endl;
+
+    int num_of_image_per_batch = 500;
     int srcN_basic_mem_size    = src.rows * src.cols * sizeof(uchar);
 
     cv::Mat lut_1(1, BINS, CV_8UC1), lut_2(1, BINS, CV_8UC1),
-        dst_1 = cv::Mat::zeros(src.rows, src.cols, src.type()),
-        dst_2 = cv::Mat::zeros(src.rows, src.cols, src.type()); // output
+        dst = cv::Mat::zeros(src.rows, src.cols, src.type());
 
     ////////////////////////////////
     // OpenCV init
-    cv::InputArray arr_src = src, arr_lut = lut_1, arr_dst = dst_1;
+    cv::InputArray arr_src = src, arr_lut = lut_1, arr_dst = dst;
 
     const cv::ocl::Device &dev        = cv::ocl::Device::getDefault();
     int                    compunits  = 1 /*dev.maxComputeUnits()*/; // max compute units
@@ -235,8 +249,8 @@ float run_equalizeHist(cv::VideoCapture video)
     cl_kernel        kernel_calculate_histogram_1 = 0, kernel_calcLUT_1 = 0, kernel_calculate_histogram_2 = 0,
               kernel_calcLUT_2 = 0, kernel_LUT_1 = 0, kernel_LUT_2 = 0, kernel_copy = 0;
     cl_int err = 0, src_step = src.step[0], src_offset = srcOffset, src_rows = src.rows, src_cols = src.cols,
-           total = src.total(), lut_step = lut_1.step[0], lut_offset = lutOffset, dst_step = dst_1.step[0],
-           dst_offset = dstOffset, dst_rows = dst_1.rows, dst_cols = dst_1.cols;
+           total = src.total(), lut_step = lut_1.step[0], lut_offset = lutOffset, dst_step = dst.step[0],
+           dst_offset = dstOffset, dst_rows = dst.rows, dst_cols = dst.cols;
 
     // create context
     if (get_cl_context(&context, &devices, 0) == false)
@@ -291,23 +305,25 @@ float run_equalizeHist(cv::VideoCapture video)
 
     // CL_MEM_USE_HOST_PTR: zero copy
     // buffer1 & buffer2: double buffering
+    std::cout << "sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch: "
+              << sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch << std::endl;
     cl_src_1 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
                               sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, NULL, &err);
     cl_ghist_1 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
                                 sizeof(int) * ghist_1.rows * ghist_1.cols * num_of_image_per_batch, NULL, &err);
+    std::cout << "sizeof(uchar) * lut_1.rows * lut_1.cols * num_of_image_per_batch: "
+              << sizeof(uchar) * lut_1.rows * lut_1.cols * num_of_image_per_batch << std::endl;
     cl_lut_1 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
                               sizeof(uchar) * lut_1.rows * lut_1.cols * num_of_image_per_batch, NULL, &err);
-    // cl_src_2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
-    //                           sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, srcN, &err);
-    // cl_ghist_2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
-    //                             sizeof(int) * ghist_1.rows * ghist_1.cols * num_of_image_per_batch, ghistN, &err);
-    // cl_lut_2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
-    //                           sizeof(uchar) * lut_1.rows * lut_1.cols * num_of_image_per_batch, lutN, &err);
-    cl_dst_1 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
-                              sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, NULL, &err);
 
-    if (cl_src_1 == 0 || cl_ghist_1 == 0 || cl_lut_1 == 0 /*|| cl_src_2 == 0 || cl_ghist_2 == 0 || cl_lut_2 == 0*/ ||
-        cl_dst_1 == 0)
+    cl_src_2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                              sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, NULL, &err);
+    cl_ghist_2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                                sizeof(int) * ghist_1.rows * ghist_1.cols * num_of_image_per_batch, NULL, &err);
+    cl_lut_2 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR,
+                              sizeof(uchar) * lut_1.rows * lut_1.cols * num_of_image_per_batch, NULL, &err);
+
+    if (cl_src_1 == 0 || cl_ghist_1 == 0 || cl_lut_1 == 0 || cl_src_2 == 0 || cl_ghist_2 == 0 || cl_lut_2 == 0)
     {
         std::cout << "cannot create buffer" << std::endl;
         std::cout << "err: " << err << std::endl;
@@ -386,64 +402,63 @@ float run_equalizeHist(cv::VideoCapture video)
         size_t localws_calclut[1]  = {128};
     }
 
-    // test kernel
-    // size_t globalws_copy[2] = {src.rows, src.cols};
-    size_t globalws_copy[1] = {src.rows * src.cols * num_of_image_per_batch};
+    // // test kernel
+    // // size_t globalws_copy[2] = {src.rows, src.cols};
+    // size_t globalws_copy[1] = {src.rows * src.cols * num_of_image_per_batch};
 
     // opencl event
-    cl_event event_odd[2], event_even[2], event_even_calcHist[num_of_image_per_batch], map_input_complete,
-        map_output_complete, copy_complete, ghist_complete;
+    cl_event event_even_calcHist[num_of_image_per_batch], event_even_calcLUT[num_of_image_per_batch],
+        map_input_complete, map_output_complete, copy_complete, ghist_complete;
 
     int64_t t2   = cv::getTickCount();
     double  time = (t2 - t1) / cv::getTickFrequency();
-
     ///////////////////////////////////////////////////////////////////////
     //
     // first frame
     //
     ///////////////////////////////////////////////////////////////////////
-    uchar *dataIn, *dataOut, *startPtr, *lutPtr;
+    uchar *dataIn_1, *dataOut_1, *startPtr_1;
 
+    // std::cout << "sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch: "
+    //           << sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch << std::endl;
     // address for Mat data to write in. dataIn is unchangeable
-    std::cout << "sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch: "
-              << sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch << std::endl;
-    dataIn = (uchar *)clEnqueueMapBuffer(queue_1, cl_src_1, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0,
-                                         sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, 0, 0,
-                                         &map_input_complete, &err);
-    clFlush(queue_1);
-    err = clWaitForEvents(1, &map_input_complete);
-
+    dataIn_1 = (uchar *)clEnqueueMapBuffer(queue_1, cl_src_1, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0,
+                                           sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, 0, 0,
+                                           &map_input_complete, &err);
     if (err != CL_SUCCESS)
     {
-        std::cout << "clEnqueueMapBuffer cl_src_1 not success" << std::endl;
+        std::cout << "clEnqueueMapBuffer dataIn_1 fail" << std::endl;
+        std::cout << "err: " << err << std::endl;
     }
 
-    cv::Mat tmp;
+    clFlush(queue_1);
 
-    int read_src_offset = sizeof(uchar) * src.rows * src.cols;
-    startPtr            = dataIn;
+    cv::Mat tmp_1[num_of_image_per_batch];
+    // cv::Mat *tmp_1[5];
+    // read image from video    
+    // startPtr_1           = dataIn_1;
+    int vidoeFrameNumber = 0;
+    video.set(CV_CAP_PROP_POS_FRAMES, 0);
     for (int i = 0; i < num_of_image_per_batch; i++)
-    {
-        video.read(tmp);
-        cv::cvtColor(tmp, tmp, CV_BGR2GRAY);
-        
-        // tmp = cv::Mat::zeros(src.size(), CV_8UC1);
-        // std::cout << "tmp.size()" << tmp. size() << std::endl;
-        
-        memcpy(startPtr, tmp.data, sizeof(uchar) * src.rows * src.cols);
-        startPtr += read_src_offset;
+    {        
+        // std::cout << "src.rows: " << src.rows << "src.cols: " << src.cols << std::endl;
+        // tmp_1[i] = new cv::Mat(src.rows, src.cols, CV_8UC1, &dataIn_1[i * src.rows * src.cols]);
+        // video.read(*tmp_1[i]);        
+        // if ((*tmp_1[i]).empty()) // empty frame
+        //     break;        
+        // // check data
+        // assert( (*tmp_1[i]).data == &dataIn_1[i * src.rows * src.cols] );    
+        // cv::cvtColor((*tmp_1[i]), (*tmp_1[i]), CV_BGR2GRAY);
+        // cv::imshow("*tmp_1", *tmp_1[i]);
 
-        cv::imshow("tmp", tmp);
-        cv::waitKey(0);
+        video.read(tmp_1[i]);
+        if (tmp_1[i].empty()) // empty frame
+            break;
+        cv::cvtColor(tmp_1[i], tmp_1[i], CV_BGR2GRAY);
+        memcpy( &dataIn_1[i * src.rows * src.cols], tmp_1[i].data, sizeof(uchar) * src.rows * src.cols );
+        // assert problem..    
+        // assert( tmp.data == /*&dataIn_1[i * src.rows * src.cols]*/startPtr_1);            
     }
-    startPtr = dataIn; // return to origin memory head
-    // copy video data into mapped memory region on device
-    memcpy(dataIn, startPtr, sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch);
-
-    cv::Mat src_res = cv::Mat(src.rows * num_of_image_per_batch, src.cols, src.type(), dataIn);
-    std::cout << "src_res size" << src_res.size() << std::endl;
-    cv::imshow("src_res", src_res);
-    cv::waitKey(0);
 
     // Kernel 1: calculate histogram of multiple images
     clSetKernelArg(kernel_calculate_histogram_1, 0, sizeof(cl_mem), &cl_src_1);
@@ -461,11 +476,11 @@ float run_equalizeHist(cv::VideoCapture video)
     for (int i = 0; i < num_of_image_per_batch; i++)
     {
         new_offset = i * (sizeof(uchar) * src.rows * src.cols); // i = 0 ~ (num_of_image_per_batch -)
-        std::cout << "i =  " << i << ", new_offset = " << new_offset << std::endl;
+        // std::cout << "i =  " << i << ", new_offset = " << new_offset << std::endl;
         clSetKernelArg(kernel_calculate_histogram_1, 2, sizeof(cl_int), &new_offset);
 
         hist_offset = i * (sizeof(int) * ghist_1.rows * ghist_1.cols);
-        std::cout << "i =  " << i << ", hist_offset = " << hist_offset << std::endl;
+        // std::cout << "i =  " << i << ", hist_offset = " << hist_offset << std::endl;
 
         clSetKernelArg(kernel_calculate_histogram_1, 6, sizeof(cl_int), &hist_offset);
 
@@ -483,18 +498,43 @@ float run_equalizeHist(cv::VideoCapture video)
         clFlush(queue_1);
     }
 
-    err = clWaitForEvents(num_of_image_per_batch, event_even_calcHist); // event_even_calcHist: cl event array
+    // Kernel 2: calculate histogram of multiple images
+    clSetKernelArg(kernel_calcLUT_1, 0, sizeof(cl_mem), &cl_lut_1);
 
-    std::cout << "ghist_1 size" << ghist_1.size() << std::endl;
-    int *ghistPtr;
-    // map a region of the buffer object given by buffer into the host address space and
-    // returns a pointer to this mapped region
-    ghistPtr = (int *)clEnqueueMapBuffer(queue_1, cl_ghist_1, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0,
-                                         sizeof(int) * ghist_1.rows * ghist_1.cols * num_of_image_per_batch, 0, 0,
-                                         &map_output_complete, &err);
+    clSetKernelArg(kernel_calcLUT_1, 2, sizeof(cl_mem), &cl_ghist_1);
+    clSetKernelArg(kernel_calcLUT_1, 3, sizeof(cl_int), &total);
+
+    // cl_int new_offset = 0, hist_offset = 0;
+
+    // #pragma unroll
+    for (int i = 0; i < num_of_image_per_batch; i++)
+    {
+        lut_offset = i * (sizeof(uchar) * lut_1.rows * lut_1.cols);
+        // std::cout << "i =  " << i << ", lut_offset = " << lut_offset << std::endl;
+
+        clSetKernelArg(kernel_calcLUT_1, 1, sizeof(cl_int), &lut_offset);
+
+        err = clEnqueueNDRangeKernel(queue_1, kernel_calcLUT_1, 1, 0, globalws_calclut, localws_calclut,
+                                     num_of_image_per_batch, event_even_calcHist, &event_even_calcLUT[i]);
+        if (err != CL_SUCCESS)
+        {
+            std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
+            std::cout << "err = " << err << std::endl;
+            release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT, cl_src_1,
+                                cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2, cl_dst_2,
+                                kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
+                                kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
+        }
+        clFlush(queue_1);
+    }
+
+    uchar *lutPtr_1 =
+        (uchar *)clEnqueueMapBuffer(queue_1, cl_lut_1, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0,
+                                    sizeof(uchar) * lut_1.rows * lut_1.cols * num_of_image_per_batch,
+                                    num_of_image_per_batch, event_even_calcLUT, &map_output_complete, &err);
     if (err != CL_SUCCESS)
     {
-        std::cout << "Can't enqueue map buffer" << std::endl;
+        std::cout << "Can't enqueue map buffer lutPtr" << std::endl;
         std::cout << "err = " << err << std::endl;
         release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT, cl_src_1,
                             cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2, cl_dst_2,
@@ -502,61 +542,26 @@ float run_equalizeHist(cv::VideoCapture video)
                             kernel_calcLUT_2, kernel_LUT_2);
     }
 
-    clFlush(queue_1);
-
-    err = clWaitForEvents(1, &map_output_complete);
-    if (err != CL_SUCCESS)
-    {
-        std::cout << "clEnqueueMapBuffer cl_ghist_1 not success" << std::endl;
-    }
-
-    std::cout << "sizeof(int) * ghist_1.rows * ghist_1.cols * num_of_image_per_batch: "
-              << sizeof(int) * ghist_1.rows * ghist_1.cols * num_of_image_per_batch << std::endl;
-    
-    // copy video data into mapped memory region on device
-    // cv::Mat ghist_1_res(ghist_1.rows * num_of_image_per_batch, ghist_1.cols, ghist_1.type());
-    // clEnqueueReadBuffer(queue_1, cl_ghist_1, CL_TRUE, 0,
-    //                     sizeof(int) * ghist_1.rows * ghist_1.cols * num_of_image_per_batch, ghist_1_res.data, 1,
-    //                     &map_output_complete, NULL);
-
-    cv::Mat ghist_1_res = cv::Mat(ghist_1.rows * num_of_image_per_batch, ghist_1.cols, ghist_1.type());
-    memcpy(ghist_1_res.data, ghistPtr, sizeof(int) * ghist_1.rows * ghist_1.cols * num_of_image_per_batch);
-
-    std::cout << "ghist_1 size" << ghist_1_res.size() << std::endl;
-
+    uchar *src_copy_ptr = 0, *lut_src_copy_ptr = 0;
+    src_copy_ptr     = dataIn_1;
+    lut_src_copy_ptr = lutPtr_1;
     for (int i = 0; i < num_of_image_per_batch; i++)
     {
-        std::cout << "# of img: " << i << std::endl;
-        for (int j = 0; j < BINS; j++)
-        {
-            std::cout << ghist_1_res.at<int>(i, j) << ", ";
-        }
-        std::cout << std::endl;
+        if (tmp_1[i].empty()) // empty frame
+            break;                        
+        cv::Mat lut_write_1_res(lut_1.rows, lut_1.cols, lut_1.type(), lut_src_copy_ptr);
+        // cout << "lut_write_1_res: " << lut_write_1_res << std::endl;
+
+        cv::LUT( tmp_1[i], lut_write_1_res, dst);
+        // cv::imshow("final dst: ", dst);
+        // cv::waitKey(15);
+
+        lut_src_copy_ptr += (sizeof(uchar) * lut_1.rows * lut_1.cols);
     }
 
-    // dst_1 = cv::Mat(src.rows, src.cols, src.type(), dataOut);
-    // memcpy(dst.data, dataOut, sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch);
-
-    // ********** show result of eqHist **********
-    // std::cout << "dst size" << dst_1.size() << std::endl;
-    // cv::imshow("dst", dst_1);
-    // cv::waitKey(0);
-
-    tmp.release();
-    src.release();
-    err = clEnqueueUnmapMemObject(queue_1, cl_src_1, dataIn, 0, NULL, NULL);
-    err = clEnqueueUnmapMemObject(queue_1, cl_dst_1, dataOut, 0, NULL, NULL);
-
-    // cv::LUT(src, lut_1, dst_1);
-
-    // check data
-    // for (int i = 0; i < num_of_image_per_batch; i++)
-    // {
-    //     assert((*srcN[i]).data == &srcN_data[i * srcN_basic_mem_size]);
-    // }
-
-    // cv::waitKey(30); // must wait if you want to show image
-    // cv::imshow("Histogram equalization", dst_1);
+    // free memory here    
+    err = clEnqueueUnmapMemObject(queue_1, cl_src_1, dataIn_1, 0, NULL, NULL);
+    err = clEnqueueUnmapMemObject(queue_1, cl_lut_1, lutPtr_1, 0, NULL, NULL);    
 
     ///////////////////////////////////////////////////////////////////////
     //
@@ -564,95 +569,311 @@ float run_equalizeHist(cv::VideoCapture video)
     //
     ///////////////////////////////////////////////////////////////////////
     double total_timer_capture = 0, total_timer_cvt = 0, total_timer_eqHist = 0;
-    // for (int i = 1; i < capture.get(CV_CAP_PROP_FRAME_COUNT); i++)
-    // {
-    //     // std::cout << "i: " << i << std::endl;
-    //     t1 = cv::getTickCount();
-    //     // Read the file
-    //     video >> input;
-    //     t2                  = cv::getTickCount();
-    //     total_timer_capture = total_timer_capture + ((t2 - t1) / cv::getTickFrequency());
+    for (int j = num_of_image_per_batch; j < floor(video.get(CV_CAP_PROP_FRAME_COUNT)); j += num_of_image_per_batch)
+    {
+        // std::cout << "i: " << i << std::endl;
+        // t1 = cv::getTickCount();
+        // // Read the file
+        // video >> src;
+        // t2                  = cv::getTickCount();
+        // total_timer_capture = total_timer_capture + ((t2 - t1) / cv::getTickFrequency());
 
-    //     t1 = cv::getTickCount();
-    //     // convert to gray scale image
-    //     cv::cvtColor(input, src, CV_BGR2GRAY);
-    //     t2              = cv::getTickCount();
-    //     total_timer_cvt = total_timer_cvt + ((t2 - t1) / cv::getTickFrequency());
+        // t1 = cv::getTickCount();
+        // // convert to gray scale image
+        // // cv::cvtColor(src, src, CV_BGR2GRAY);
+        // t2              = cv::getTickCount();
+        // total_timer_cvt = total_timer_cvt + ((t2 - t1) / cv::getTickFrequency());
 
-    //     if (input.empty()) // empty(): Returns true if the array has no elements.even
-    //     {
-    //         std::cout << "input is empty..." << std::endl;
-    //         break;
-    //     }
-    //     // ///////////////////////////////////////////////////////////////////////
-    //     // //
-    //     // // odd frame
-    //     // //
-    //     // ///////////////////////////////////////////////////////////////////////
+        // if (src.empty()) // empty(): Returns true if the array has no elements.even
+        // {
+        //     std::cout << "src is empty..." << std::endl;
+        //     break;
+        // }
+        // t1 = cv::getTickCount();
+        // ///////////////////////////////////////////////////////////////////////
+        // //
+        // // odd frame
+        // //
+        // ///////////////////////////////////////////////////////////////////////
+        if (j % 2 != 0)
+        {
+            uchar *dataIn_2, *dataOut_2, *startPtr_2;
 
-    //     ///////////////////////////////////////////////////////////////////////
-    //     //
-    //     // even frame
-    //     //
-    //     ///////////////////////////////////////////////////////////////////////
-    //     // if (i % 2 == 0)
-    //     // {
-    //     // execute the kernel
-    //     err = clEnqueueNDRangeKernel(queue_1, kernel_calculate_histogram_1, 1, 0, globalws_hist, localws_hist, 1,
-    //                                  &event_even[2] /*&event_odd[2]*/, &event_even[0]);
-    //     if (err != CL_SUCCESS)
-    //     {
-    //         std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
-    //         std::cout << "err = " << err << std::endl;
-    //         release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT,
-    //                             cl_src_1, cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2, cl_dst_2,
-    //                             kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
-    //                             kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
-    //     }
+            // address for Mat data to write in. dataIn is unchangeable
+            // std::cout << "sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch: "
+            //           << sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch << std::endl;
+            dataIn_2 = (uchar *)clEnqueueMapBuffer(queue_2, cl_src_2, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0,
+                                                   sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, 0,
+                                                   0,
+                                                   &map_input_complete, &err);
+            if (err != CL_SUCCESS)
+            {
+                std::cout << "clEnqueueMapBuffer dataIn_2 fail" << std::endl;
+                std::cout << "err: " << err << std::endl;
+                release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT,
+                                    cl_src_1, cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2,
+                                    cl_dst_2,
+                                    kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
+                                    kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
+            }
 
-    //     // clWaitForEvents(1, &event[0]);
+            clFlush(queue_2);
 
-    //     // execute the kernel, start to enqueue when event[0] ends
-    //     err = clEnqueueNDRangeKernel(queue_1, kernel_calcLUT_1, 1, 0, globalws_calclut, localws_calclut, 1,
-    //                                  &event_even[0], &event_even[1]);
-    //     if (err != CL_SUCCESS)
-    //     {
-    //         std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
-    //         std::cout << "err = " << err << std::endl;
-    //         release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT,
-    //                             cl_src_1, cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2, cl_dst_2,
-    //                             kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
-    //                             kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
-    //     }
-    //     // clWaitForEvents(1, &event[0]);
+            cv::Mat tmp_2[num_of_image_per_batch];
+            // read image from video
+            video.set(CV_CAP_PROP_POS_FRAMES, j);
+            for (int i = 0; i < num_of_image_per_batch; i++)
+            {
+                video.read(tmp_2[i]);
+                if (tmp_2[i].empty()) // empty frame
+                    break;
+                cv::cvtColor(tmp_2[i], tmp_2[i], CV_BGR2GRAY);
+                memcpy( &dataIn_2[i * src.rows * src.cols], tmp_2[i].data, sizeof(uchar) * src.rows * src.cols );
+                // assert problem..    
+                // assert( tmp.data == /*&dataIn_1[i * src.rows * src.cols]*/startPtr_1);      
+            }            
 
-    //     err = clEnqueueNDRangeKernel(queue_1, kernel_LUT_1, 2, 0, globalws_lut, NULL, 1, &event_even[1],
-    //                                  &event_even[2]);
-    //     if (err != CL_SUCCESS)
-    //     {
-    //         std::cout << "Can't enqueue kernel kernel_LUT" << std::endl;
-    //         std::cout << "err = " << err << std::endl;
-    //         release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT,
-    //                             cl_src_1, cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2, cl_dst_2,
-    //                             kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
-    //                             kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
-    //     }
+            // Kernel 1: calculate histogram of multiple images
+            clSetKernelArg(kernel_calculate_histogram_2, 0, sizeof(cl_mem), &cl_src_2);
+            clSetKernelArg(kernel_calculate_histogram_2, 1, sizeof(cl_int), &src_step);
 
-    //     // writer << dst_1;
-    //     cv::waitKey(30); // must wait if you want to show image
-    //     cv::imshow("Histogram equalization", dst_1);
-    //     // }
+            clSetKernelArg(kernel_calculate_histogram_2, 3, sizeof(cl_int), &src_rows);
+            clSetKernelArg(kernel_calculate_histogram_2, 4, sizeof(cl_int), &src_cols);
+            clSetKernelArg(kernel_calculate_histogram_2, 5, sizeof(cl_mem), &cl_ghist_2);
 
-    //     t2                 = cv::getTickCount();
-    //     total_timer_eqHist = total_timer_eqHist + ((t2 - t1) / cv::getTickFrequency());
+            clSetKernelArg(kernel_calculate_histogram_2, 7, sizeof(cl_int), &total);
 
-    //     // write frame
-    //     // writer << dst;
+            cl_int new_offset = 0, hist_offset = 0;
 
-    //     // cv::waitKey(15); // must wait if you want to show image
-    //     // cv::imshow("Histogram equalization", dst);
-    // }
-    // ////////////////////////////////
+            // #pragma unroll
+            for (int i = 0; i < num_of_image_per_batch; i++)
+            {
+                new_offset = i * (sizeof(uchar) * src.rows * src.cols); // i = 0 ~ (num_of_image_per_batch -)
+                // std::cout << "i =  " << i << ", new_offset = " << new_offset << std::endl;
+                clSetKernelArg(kernel_calculate_histogram_2, 2, sizeof(cl_int), &new_offset);
+
+                hist_offset = i * (sizeof(int) * ghist_2.rows * ghist_2.cols);
+                // std::cout << "i =  " << i << ", hist_offset = " << hist_offset << std::endl;
+
+                clSetKernelArg(kernel_calculate_histogram_2, 6, sizeof(cl_int), &hist_offset);
+
+                err = clEnqueueNDRangeKernel(queue_2, kernel_calculate_histogram_2, 1, 0, globalws_hist,
+                localws_hist,
+                                             1, &map_input_complete, &event_even_calcHist[i]);
+                if (err != CL_SUCCESS)
+                {
+                    std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
+                    std::cout << "err = " << err << std::endl;
+                    release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT,
+                                        cl_src_1, cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2,
+                                        cl_dst_2, kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
+                                        kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
+                }
+                clFlush(queue_1);
+            }
+
+            // Kernel 2: calculate histogram of multiple images
+            clSetKernelArg(kernel_calcLUT_2, 0, sizeof(cl_mem), &cl_lut_2);
+
+            clSetKernelArg(kernel_calcLUT_2, 2, sizeof(cl_mem), &cl_ghist_2);
+            clSetKernelArg(kernel_calcLUT_2, 3, sizeof(cl_int), &total);
+
+            // cl_int new_offset = 0, hist_offset = 0;
+
+            // #pragma unroll
+            for (int i = 0; i < num_of_image_per_batch; i++)
+            {
+                lut_offset = i * (sizeof(uchar) * lut_1.rows * lut_1.cols);
+                // std::cout << "i =  " << i << ", lut_offset = " << lut_offset << std::endl;
+
+                clSetKernelArg(kernel_calcLUT_2, 1, sizeof(cl_int), &lut_offset);
+
+                err = clEnqueueNDRangeKernel(queue_1, kernel_calcLUT_2, 1, 0, globalws_calclut, localws_calclut,
+                                             num_of_image_per_batch, event_even_calcHist, &event_even_calcLUT[i]);
+                if (err != CL_SUCCESS)
+                {
+                    std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
+                    std::cout << "err = " << err << std::endl;
+                    release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT,
+                                        cl_src_1, cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2,
+                                        cl_dst_2, kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
+                                        kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
+                }
+                clFlush(queue_1);
+            }
+
+            uchar *lutPtr_2 =
+                (uchar *)clEnqueueMapBuffer(queue_2, cl_lut_2, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0,
+                                            sizeof(uchar) * lut_2.rows * lut_2.cols * num_of_image_per_batch,
+                                            num_of_image_per_batch, event_even_calcLUT, &map_output_complete, &err);
+            if (err != CL_SUCCESS)
+            {
+                std::cout << "Can't enqueue map buffer lutPtr" << std::endl;
+                std::cout << "err = " << err << std::endl;
+                release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT,
+                                    cl_src_1, cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2,
+                                    cl_dst_2,
+                                    kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
+                                    kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
+            }
+
+            uchar *src_copy_ptr = 0, *lut_src_copy_ptr = 0;
+            src_copy_ptr     = dataIn_2;
+            lut_src_copy_ptr = lutPtr_2;
+            for (int i = 0; i < num_of_image_per_batch; i++)
+            {
+                if (tmp_2[i].empty()) // empty frame
+                    break;                
+                cv::Mat lut_write_2_res(lut_2.rows, lut_2.cols, lut_2.type(), lut_src_copy_ptr);
+                cv::LUT(tmp_2[i], lut_write_2_res, dst);
+
+                // cv::imshow("final dst: ", dst);
+                // cv::waitKey(15);
+
+                lut_src_copy_ptr += (sizeof(uchar) * lut_1.rows * lut_1.cols);
+            }
+
+            err = clEnqueueUnmapMemObject(queue_2, cl_src_2, dataIn_2, 0, NULL, NULL);
+            err = clEnqueueUnmapMemObject(queue_2, cl_lut_2, lutPtr_2, 0, NULL, NULL);
+        }
+        ///////////////////////////////////////////////////////////////////////
+        //
+        // even frame
+        //
+        ///////////////////////////////////////////////////////////////////////
+        if (j % 2 == 0)
+        {
+            uchar *dataIn_1, *dataOut_1, *startPtr_1;
+
+            // address for Mat data to write in. dataIn is unchangeable
+            dataIn_1 = (uchar *)clEnqueueMapBuffer(queue_1, cl_src_1, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0,
+                                                   sizeof(uchar) * src.rows * src.cols * num_of_image_per_batch, 0,
+                                                   0,
+                                                   &map_input_complete, &err);
+            clFlush(queue_1);            
+            // read image from video            
+            video.set(CV_CAP_PROP_POS_FRAMES, j);
+            for (int i = 0; i < num_of_image_per_batch; i++)
+            {
+                video.read(tmp_1[i]);
+                if (tmp_1[i].empty()) // empty frame
+                    break;
+                cv::cvtColor(tmp_1[i], tmp_1[i], CV_BGR2GRAY);
+                memcpy( &dataIn_1[i * src.rows * src.cols], tmp_1[i].data, sizeof(uchar) * src.rows * src.cols );
+            }
+
+            // Kernel 1: calculate histogram of multiple images
+            clSetKernelArg(kernel_calculate_histogram_1, 0, sizeof(cl_mem), &cl_src_1);
+            clSetKernelArg(kernel_calculate_histogram_1, 1, sizeof(cl_int), &src_step);
+
+            clSetKernelArg(kernel_calculate_histogram_1, 3, sizeof(cl_int), &src_rows);
+            clSetKernelArg(kernel_calculate_histogram_1, 4, sizeof(cl_int), &src_cols);
+            clSetKernelArg(kernel_calculate_histogram_1, 5, sizeof(cl_mem), &cl_ghist_1);
+
+            clSetKernelArg(kernel_calculate_histogram_1, 7, sizeof(cl_int), &total);
+
+            cl_int new_offset = 0, hist_offset = 0;
+
+            // #pragma unroll
+            for (int i = 0; i < num_of_image_per_batch; i++)
+            {
+                new_offset = i * (sizeof(uchar) * src.rows * src.cols); // i = 0 ~ (num_of_image_per_batch -)
+                // std::cout << "i =  " << i << ", new_offset = " << new_offset << std::endl;
+                clSetKernelArg(kernel_calculate_histogram_1, 2, sizeof(cl_int), &new_offset);
+
+                hist_offset = i * (sizeof(int) * ghist_1.rows * ghist_1.cols);
+                // std::cout << "i =  " << i << ", hist_offset = " << hist_offset << std::endl;
+
+                clSetKernelArg(kernel_calculate_histogram_1, 6, sizeof(cl_int), &hist_offset);
+
+                err = clEnqueueNDRangeKernel(queue_1, kernel_calculate_histogram_1, 1, 0, globalws_hist,
+                localws_hist,
+                                             1, &map_input_complete, &event_even_calcHist[i]);
+                if (err != CL_SUCCESS)
+                {
+                    std::cout << "Can't enqueue kernel kernel_calculate_histogram" << std::endl;
+                    std::cout << "err = " << err << std::endl;
+                    release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT,
+                                        cl_src_1, cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2,
+                                        cl_dst_2, kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
+                                        kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
+                }
+                clFlush(queue_1);
+            }
+
+            // Kernel 2: calculate histogram of multiple images
+            clSetKernelArg(kernel_calcLUT_1, 0, sizeof(cl_mem), &cl_lut_1);
+
+            clSetKernelArg(kernel_calcLUT_1, 2, sizeof(cl_mem), &cl_ghist_1);
+            clSetKernelArg(kernel_calcLUT_1, 3, sizeof(cl_int), &total);
+
+
+            // #pragma unroll
+            for (int i = 0; i < num_of_image_per_batch; i++)
+            {
+                lut_offset = i * (sizeof(uchar) * lut_1.rows * lut_1.cols);                
+
+                clSetKernelArg(kernel_calcLUT_1, 1, sizeof(cl_int), &lut_offset);
+
+                err = clEnqueueNDRangeKernel(queue_1, kernel_calcLUT_1, 1, 0, globalws_calclut, localws_calclut,
+                                             num_of_image_per_batch, event_even_calcHist, &event_even_calcLUT[i]);
+                if (err != CL_SUCCESS)
+                {
+                    std::cout << "Can't enqueue kernel kernel_calcLUT" << std::endl;
+                    std::cout << "err = " << err << std::endl;
+                    release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT,
+                                        cl_src_1, cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2,
+                                        cl_dst_2, kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
+                                        kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
+                }
+                clFlush(queue_1);
+            }
+
+            uchar *lutPtr_1 =
+                (uchar *)clEnqueueMapBuffer(queue_1, cl_lut_1, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0,
+                                            sizeof(uchar) * lut_1.rows * lut_1.cols * num_of_image_per_batch,
+                                            num_of_image_per_batch, event_even_calcLUT, &map_output_complete, &err);
+            if (err != CL_SUCCESS)
+            {
+                std::cout << "Can't enqueue map buffer lutPtr" << std::endl;
+                std::cout << "err = " << err << std::endl;
+                release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT,
+                                    cl_src_1, cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2,
+                                    cl_dst_2,
+                                    kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1,
+                                    kernel_calculate_histogram_2, kernel_calcLUT_2, kernel_LUT_2);
+            }
+
+            uchar *src_copy_ptr = 0, *lut_src_copy_ptr = 0;
+            src_copy_ptr     = dataIn_1;
+            lut_src_copy_ptr = lutPtr_1;
+            for (int i = 0; i < num_of_image_per_batch; i++)
+            {
+                if (tmp_1[i].empty()) // empty frame
+                    break;                   
+                cv::Mat lut_write_1_res(lut_1.rows, lut_1.cols, lut_1.type(), lut_src_copy_ptr);
+
+                cv::LUT(tmp_1[i], lut_write_1_res, dst);
+                // cv::imshow("final dst: ", dst);
+                // cv::waitKey(15);
+
+                lut_src_copy_ptr += (sizeof(uchar) * lut_1.rows * lut_1.cols);
+            }
+
+            err = clEnqueueUnmapMemObject(queue_1, cl_src_1, dataIn_1, 0, NULL, NULL);
+            err = clEnqueueUnmapMemObject(queue_1, cl_lut_1, lutPtr_1, 0, NULL, NULL);
+        }
+        t2 = cv::getTickCount();
+
+        total_timer_eqHist = total_timer_eqHist + ((t2 - t1) / cv::getTickFrequency());
+
+        //     // write frame
+        //     // writer << dst;
+
+        //     // cv::waitKey(15); // must wait if you want to show image
+        //     // cv::imshow("Histogram equalization", dst);
+    }
+    ////////////////////////////////
 
     // clFinish() -> wait until all kernels in queue finish
     clFinish(queue_1);
@@ -684,6 +905,12 @@ float run_equalizeHist(cv::VideoCapture video)
     double re_time = (t2 - t1) / cv::getTickFrequency();
 
     // opencv
+    // tmp.release();
+    // free(tmp_1);
+
+    src.release();
+    // lut_1_res.release();
+
     video.release();         // When everything done, release the video capture object
     cv::destroyAllWindows(); // Closes all the frames
 
