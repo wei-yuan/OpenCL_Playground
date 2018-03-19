@@ -21,10 +21,6 @@ __kernel void calculate_histogram(__global const uchar * src_ptr, int src_step, 
     #pragma unroll    
     for (int i = lid; i < BINS; i += WGS)
     {        
-        // if(get_global_id(0) == 0)
-        // {
-        //     printf("i = %d\n", i);
-        // }            
         localhist[i] = 0;        
     }        
     // wait until every thread to finish

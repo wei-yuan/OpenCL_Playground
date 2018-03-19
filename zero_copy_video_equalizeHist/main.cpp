@@ -191,9 +191,10 @@ float run_equalizeHist(cv::VideoCapture video)
 
     double total_timer_capture = 0, total_timer_cvt = 0, total_timer_eqHist = 0, t1 = 0, t2 = 0;
     // auto start = std::chrono::system_clock::now();
-    int64_t start = cv::getTickCount();
+    int64_t start = cv::getTickCount();    
+    int i = 0;
     for (;;)
-    {
+    {        
         cv::Mat frame, grey;
         cv::Mat eqOutput;
 
@@ -206,6 +207,24 @@ float run_equalizeHist(cv::VideoCapture video)
         cv::equalizeHist(grey, eqOutput);
         int64_t t2                 = (double)cv::getTickCount();
         total_timer_eqHist +=  (t2 - t1) / cv::getTickFrequency();
+        
+        if(i == 0)
+        {
+            cv::imshow("CPU eqOutput", eqOutput);
+            cv::waitKey(0);
+            std::cout << "CPU Mat optput: \n" << std::endl;
+            for(int i=0; i < 8; i++)
+            {
+                for(int j=0; j < 8; j++)
+                {
+                    std::cout << (int)eqOutput.at<uchar>(i,j) << ", ";
+                }
+                std::cout << std::endl;
+            }
+            break;
+        }
+
+        i++;
     }
     // auto end = std::chrono::system_clock::now();
     int64_t end = cv::getTickCount();
@@ -539,10 +558,26 @@ float run_equalizeHist(cv::VideoCapture video)
     //     std::cout << "err = " << err << std::endl;
     //     release_hist_opencl(context, queue_1, queue_2, program_histogram, program_calcLUT, program_LUT, cl_src_1,
     //                         cl_src_2, cl_ghist_1, cl_lut_1, cl_dst_1, cl_ghist_2, cl_lut_2, cl_dst_2,
-    //                         kernel_calculate_histogram_1, kernel_calcLUT_1, kernel_LUT_1, kernel_calculate_histogram_2,
+    //                         kernel_calculate_histogram_eqOutput1, kernel_calcLUT_1, kernel_LUT_1, kernel_calculate_histogram_2,
     //                         kernel_calcLUT_2, kernel_LUT_2);
     // }
+    clWaitForEvents(1, &event_even[1]);
     cv::LUT(src, lut_1, dst_1);
+
+    ///////////////////////////////////////////////////////////////////////
+    // Verification
+    ///////////////////////////////////////////////////////////////////////
+    cv::imshow("GPU dst_1", dst_1);
+    cv::waitKey(0);
+    std::cout << "CPU Mat optput: \n" << std::endl;
+    for(int i=0; i < 8; i++)
+    {
+        for(int j=0; j < 8; j++)
+        {
+            std::cout << (int)dst_1.at<uchar>(i,j) << ", ";
+        }
+        std::cout << std::endl;
+    }
 
     // cv::waitKey(30); // must wait if you want to show image
     // cv::imshow("Histogram equalization", dst_1);
